@@ -1,4 +1,3 @@
-```javascript
 // ==UserScript==
 // @name         SLAX VIP V15.5 - Hyper Fast Red OCR & Translator
 // @namespace    https://viayoo.com/
