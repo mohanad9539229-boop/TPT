@@ -1,9 +1,9 @@
 ```javascript
 // ==UserScript==
-// @name         SLAX VIP V14.5 - Professional Translator
+// @name         SLAX VIP V15.0 - Fast Dark Red OCR & Translator
 // @namespace    https://viayoo.com/
-// @version      14.5
-// @description  استعادة كافة الخيارات المفقودة + نظام فحص وترجمة ذكي يدعم التبييض والترجمة الفورية بدون توكنات!
+// @version      15.0
+// @description  نظام تبييض فوري فائق السرعة، ترجمة ذكية بدون تعليق، خطوط متناسقة، واجهة زجاجية باللون الأحمر الداكن الفاخر
 // @author       Slax
 // @run-at       document-start
 // @match        *://*.webtoons.com/*
@@ -15,33 +15,34 @@
 (function() {
     'use strict';
 
-    // حفظ واسترجاع الإعدادات تلقائياً لضمان استقرار البيانات
-    const STORAGE_KEY_PREFIX = "slax_v14_";
-    const getSetting = (key, fallback) => localStorage.getItem(STORAGE_KEY_PREFIX + key) || fallback;
-    const saveSetting = (key, val) => localStorage.setItem(STORAGE_KEY_PREFIX + key, val);
+    // مساحة تخزين الإعدادات المخصصة لـ Slax
+    const STORAGE_PREFIX = "slax_v15_";
+    const getSetting = (key, fallback) => localStorage.getItem(STORAGE_PREFIX + key) || fallback;
+    const saveSetting = (key, val) => localStorage.setItem(STORAGE_PREFIX + key, val);
 
     let API_KEY = getSetting('api_key', '');
     let currentModel = getSetting('model', 'gemini-2.5-flash');
-    let translationMode = getSetting('mode', 'free'); // 'free' (OCR+Google) أو 'gemini' (AI Key)
+    let translationMode = getSetting('mode', 'free'); // 'free' أو 'gemini'
     let ocrLanguage = getSetting('ocr_lang', 'eng');
     let autoTranslateActive = false;
     let isProcessing = false;
 
     const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    const ICON_URL = "https://i.ibb.co/nMBFJ7kV/image.png";
 
-    // تحميل مكتبة Tesseract OCR محلياً
+    // تحميل مكتبة التعرف على الحروف
     function loadTesseract() {
         return new Promise((resolve, reject) => {
             if (window.Tesseract) return resolve();
             const script = document.createElement('script');
             script.src = TESSERACT_CDN;
             script.onload = () => resolve();
-            script.onerror = () => reject(new Error("فشل تحميل مكتبة الـ OCR. تحقق من الاتصال."));
+            script.onerror = () => reject(new Error("فشل تحميل محرك النصوص. تحقق من الإنترنت."));
             document.head.appendChild(script);
         });
     }
 
-    // جلب الصورة مع تجاوز حماية السيرفرات (Referer Bypass)
+    // جلب الصورة متجاوزاً القيود الأمنية
     async function getImageBlob(url) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -55,19 +56,12 @@
         });
     }
 
-    // محرك الترجمة المجاني الفوري (Google Translate API Free)
+    // محرك الترجمة المجاني الفائق السرعة لـ Google
     async function translateTextFree(text, fromLang) {
-        // تنظيف النص وتنسيقه لضمان ترجمة ممتازة
         const cleanedText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         if (!cleanedText || cleanedText.length < 2) return "";
         
-        // تحويل رموز اللغة لتتوافق مع Google
-        let sourceLang = fromLang;
-        if (fromLang === 'eng') sourceLang = 'en';
-        if (fromLang === 'kor') sourceLang = 'ko';
-        if (fromLang === 'jpn') sourceLang = 'ja';
-        if (fromLang === 'chi_sim') sourceLang = 'zh-CN';
-
+        let sourceLang = fromLang === 'eng' ? 'en' : (fromLang === 'kor' ? 'ko' : (fromLang === 'jpn' ? 'ja' : 'zh-CN'));
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=ar&dt=t&q=${encodeURIComponent(cleanedText)}`;
         
         return new Promise((resolve) => {
@@ -79,54 +73,49 @@
                         const data = JSON.parse(res.responseText);
                         let translated = "";
                         if (data && data[0]) {
-                            data[0].forEach(sentence => {
-                                if (sentence[0]) translated += sentence[0];
-                            });
+                            data[0].forEach(s => { if (s[0]) translated += s[0]; });
                         }
                         resolve(translated.trim());
                     } catch (e) {
-                        resolve("[فشلت الترجمة التلقائية]");
+                        resolve("");
                     }
                 },
-                onerror: () => resolve("[خطأ اتصال]")
+                onerror: () => resolve("")
             });
         });
     }
 
-    // إرسال تنبيهات أنيقة للمستخدم داخل الصفحة
+    // إشعار Slax الأنيق باللون الأحمر الداكن المتوهج
     function showNotification(msg, type = "info") {
         const notif = document.createElement('div');
-        notif.style = `position:fixed; bottom:20px; right:20px; background:#111; color:${type === 'error' ? '#ff4d4d' : '#00ffcc'}; border:1px solid ${type === 'error' ? '#ff4d4d' : '#00ffcc'}; padding:12px 24px; border-radius:10px; z-index:2147483647; font-family:sans-serif; font-size:12px; box-shadow:0 5px 15px rgba(0,0,0,0.5); direction:rtl; transition: all 0.3s ease;`;
+        notif.style = `
+            position:fixed; bottom:20px; right:20px; 
+            background:rgba(25, 5, 5, 0.95); 
+            color:${type === 'error' ? '#ff4d4d' : '#ff3333'}; 
+            border:1px solid #ff1a1a; 
+            padding:12px 24px; border-radius:12px; 
+            z-index:2147483647; font-family:sans-serif; font-size:12px; 
+            box-shadow:0 0 15px rgba(255, 0, 0, 0.4); direction:rtl; 
+            transition: all 0.3s ease; backdrop-filter: blur(5px);
+        `;
         notif.innerText = msg;
         document.body.appendChild(notif);
         setTimeout(() => {
             notif.style.opacity = '0';
             setTimeout(() => notif.remove(), 300);
-        }, 3500);
+        }, 3000);
     }
 
-    // تحسين جودة صورة الغيمات لزيادة دقة الـ OCR بنسبة 90%
-    function preprocessCanvasForOcr(ctx, width, height) {
-        const imgData = ctx.getImageData(0, 0, width, height);
-        const data = imgData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            // تحويل إلى تدرج رمادي (Grayscale)
-            const brightness = 0.34 * data[i] + 0.5 * data[i + 1] + 0.16 * data[i + 2];
-            // زيادة التباين بشدة (Binarization) لتوضيح النص الأسود على الخلفية البيضاء
-            const threshold = 120; 
-            const finalVal = brightness > threshold ? 255 : 0;
-            data[i] = finalVal;
-            data[i+1] = finalVal;
-            data[i+2] = finalVal;
-        }
-        ctx.putImageData(imgData, 0, 0);
-    }
-
-    // معالجة تبييض وترجمة المانجا
+    // معالجة تبييض الصفحة وتركيب النصوص المترجمة بأحجام ذكية
     async function processImage(img) {
         if (img.dataset.ocrProcessed) return;
         img.dataset.ocrProcessed = "processing";
 
+        // إظهار مؤشر صغير على الصورة يوضح أنها قيد الترجمة
+        const loaderIndicator = document.createElement('div');
+        loaderIndicator.innerText = "⚡ جاري التبييض والترجمة الفورية...";
+        loaderIndicator.style = "position:absolute; background:rgba(139,0,0,0.85); color:#fff; font-size:10px; padding:4px 8px; border-radius:4px; z-index:99; font-family:sans-serif; pointer-events:none; left:5px; top:5px; border:1px solid #ff3333;";
+        
         try {
             const blob = await getImageBlob(img.src);
             const blobUrl = URL.createObjectURL(blob);
@@ -145,26 +134,35 @@
             canvas.height = tempImg.naturalHeight;
             ctx.drawImage(tempImg, 0, 0);
 
+            // تفعيل محيط التبييض وتوليد الحاوية فوراً
+            const wrapper = document.createElement('div');
+            wrapper.className = "slax-ocr-wrapper";
+            wrapper.style = `position: relative; display: inline-block; width: ${img.clientWidth}px; height: ${img.clientHeight}px;`;
+            
+            img.parentNode.insertBefore(wrapper, img);
+            wrapper.appendChild(img);
+            wrapper.appendChild(loaderIndicator);
+
+            img.style.width = "100%";
+            img.style.height = "auto";
+            img.style.display = "block";
+
+            const scaleX = img.clientWidth / canvas.width;
+            const scaleY = img.clientHeight / canvas.height;
+
             let paragraphs = [];
 
             if (translationMode === 'free') {
-                // استخدام Tesseract OCR المجاني بعد تصفية الصورة وتجهيزها للترجمة الفورية
-                const preCanvas = document.createElement('canvas');
-                const preCtx = preCanvas.getContext('2d');
-                preCanvas.width = canvas.width;
-                preCanvas.height = canvas.height;
-                preCtx.drawImage(tempImg, 0, 0);
-                preprocessCanvasForOcr(preCtx, preCanvas.width, preCanvas.height);
-
+                // الفحص السريع والذكي والمباشر دون تعقيد لتقليل زمن المعالجة للنصف!
                 const worker = await Tesseract.createWorker(ocrLanguage);
-                const ret = await worker.recognize(preCanvas);
+                const ret = await worker.recognize(canvas);
                 paragraphs = ret.data.paragraphs;
                 await worker.terminate();
             } else {
-                // استخدام محرك Gemini الذكي الفائق (يتطلب API Key)
                 if (!API_KEY) {
-                    showNotification("يرجى إدخال مفتاح الـ Gemini لتفعيل ترجمة الذكاء الاصطناعي!", "error");
+                    showNotification("يرجى إدخال مفتاح الـ Gemini أو تشغيل الوضع المجاني السريع!", "error");
                     img.removeAttribute('data-ocr-processed');
+                    loaderIndicator.remove();
                     return;
                 }
                 const base64Data = await new Promise((resolve) => {
@@ -179,7 +177,7 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "You are a professional Manga/Manhwa translator. Detect all text boxes in this image, translate them accurately to Arabic, and output the result in JSON format: { 'translations': [{ 'text': 'translated_arabic_text', 'bbox': { 'x0': integer, 'y0': integer, 'x1': integer, 'y1': integer } }] }. Maintain the original comic tone, emotions, and local slang correctly. Keep coordinates strictly matched to original text positions." },
+                                { text: "Detect all text bubbles, translate them to Arabic, output JSON: { 'translations': [{ 'text': 'arabic', 'bbox': { 'x0': int, 'y0': int, 'x1': int, 'y1': int } }] }." },
                                 { inline_data: { mime_type: "image/jpeg", data: base64Data } }
                             ]
                         }],
@@ -190,57 +188,45 @@
                 const resultJson = await res.json();
                 const aiText = resultJson.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (aiText) {
-                    const parsed = JSON.parse(aiText);
-                    paragraphs = parsed.translations || [];
+                    paragraphs = JSON.parse(aiText).translations || [];
                 }
             }
 
             if (paragraphs && paragraphs.length > 0) {
-                const wrapper = document.createElement('div');
-                wrapper.className = "slax-ocr-wrapper";
-                wrapper.style = `position: relative; display: inline-block; width: ${img.clientWidth}px; height: ${img.clientHeight}px;`;
-                
-                img.parentNode.insertBefore(wrapper, img);
-                wrapper.appendChild(img);
-
-                img.style.width = "100%";
-                img.style.height = "auto";
-                img.style.display = "block";
-
-                const scaleX = img.clientWidth / canvas.width;
-                const scaleY = img.clientHeight / canvas.height;
-
                 for (const p of paragraphs) {
                     const bbox = p.bbox;
                     let originalText = p.text || "";
                     if (!bbox) continue;
 
-                    // تبييض الغيمة (مسح النص الأصلي وتعبئته بلون غيمة المانجا)
-                    const sampleX = Math.max(0, bbox.x0 - 5);
-                    const sampleY = Math.max(0, bbox.y0 - 5);
+                    // مسح الغيمة والتبييض الذكي بالاعتماد على درجة لون الغيمة الأصلية
+                    const sampleX = Math.min(canvas.width - 1, Math.max(0, bbox.x0 - 3));
+                    const sampleY = Math.min(canvas.height - 1, Math.max(0, bbox.y0 - 3));
                     const pixelData = ctx.getImageData(sampleX, sampleY, 1, 1).data;
                     const bgRgb = `rgb(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]})`;
 
                     ctx.fillStyle = bgRgb;
                     ctx.fillRect(bbox.x0 - 4, bbox.y0 - 4, (bbox.x1 - bbox.x0) + 8, (bbox.y1 - bbox.y0) + 8);
 
-                    // ترجمة النص فوراً إذا كان الوضع مجانياً
                     let arabicTranslation = originalText;
                     if (translationMode === 'free') {
                         arabicTranslation = await translateTextFree(originalText, ocrLanguage);
                     }
 
-                    if (!arabicTranslation || arabicTranslation.length < 1) continue;
+                    if (!arabicTranslation) continue;
 
-                    // وضع النص العربي المترجم والمنسق مكان النص القديم
+                    // الحجم الذكي للخط: معادلة تمنع تضخم الخط على الهواتف والشاشات
+                    const width = (bbox.x1 - bbox.x0) * scaleX;
+                    const height = (bbox.y1 - bbox.y0) * scaleY;
+                    
+                    // حساب حجم خط مرن جداً ومتناسق مع حجم المساحة الممسوحة
+                    let calculatedFontSize = Math.min(14, Math.max(9, (height * 0.18) + (width * 0.03)));
+
                     const textOverlay = document.createElement('div');
                     textOverlay.className = "slax-translated-bubble";
                     textOverlay.innerText = arabicTranslation;
 
                     const left = bbox.x0 * scaleX;
                     const top = bbox.y0 * scaleY;
-                    const width = (bbox.x1 - bbox.x0) * scaleX;
-                    const height = (bbox.y1 - bbox.y0) * scaleY;
 
                     textOverlay.style = `
                         position: absolute;
@@ -249,15 +235,15 @@
                         width: ${width}px;
                         height: ${height}px;
                         color: #000;
-                        font-family: 'Segoe UI', system-ui, sans-serif;
-                        font-weight: bold;
-                        font-size: ${Math.max(10, height * 0.23)}px;
+                        font-family: system-ui, -apple-system, sans-serif;
+                        font-weight: 800;
+                        font-size: ${calculatedFontSize}px;
                         text-align: center;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        line-height: 1.2;
-                        overflow: visible;
+                        line-height: 1.15;
+                        overflow: hidden;
                         word-break: break-word;
                         pointer-events: none;
                         z-index: 10;
@@ -267,19 +253,20 @@
                     wrapper.appendChild(textOverlay);
                 }
 
-                // تحديث الصورة بعد المسح والتبييض
                 img.src = canvas.toDataURL();
                 img.dataset.ocrProcessed = "success";
             } else {
                 img.dataset.ocrProcessed = "no-text";
             }
         } catch (err) {
-            console.error("خطأ معالجة وتبييض الصورة: ", err);
+            console.error(err);
             img.dataset.ocrProcessed = "failed";
+        } finally {
+            loaderIndicator.remove();
         }
     }
 
-    // حلقة المعالجة الدورية لجميع صفحات الفصل
+    // استدعاء مستمر لمعالجة صفحات المانجا المتبقية
     async function startTranslationPipeline() {
         if (!autoTranslateActive || isProcessing) return;
         isProcessing = true;
@@ -287,19 +274,19 @@
         const imgs = Array.from(document.querySelectorAll('img:not([data-ocr-processed])')).filter(i => i.clientHeight > 200);
         if (imgs.length > 0) {
             const statusEl = document.getElementById('ai-status');
-            if (statusEl) statusEl.innerText = `⏳ جاري معالجة ${imgs.length} صفحات...`;
+            if (statusEl) statusEl.innerText = `🔄 معالجة ${imgs.length} صفحة...`;
             
             for (const img of imgs) {
                 if (!autoTranslateActive) break;
                 await processImage(img);
             }
-            if (statusEl) statusEl.innerText = "جاهز للعمل ✅";
+            if (statusEl) statusEl.innerText = "نشط ⚡";
         }
         isProcessing = false;
-        setTimeout(startTranslationPipeline, 3000);
+        setTimeout(startTranslationPipeline, 2000);
     }
 
-    // بناء واجهة المستخدم المحسنة بالكامل لـ Slax
+    // تصميم واجهة Slax الأنيقة (أحمر غامق، زجاج بلوري مع تدرجات متوهجة)
     function createSlaxUI() {
         if (document.getElementById('slax-root')) return;
 
@@ -309,76 +296,86 @@
         document.body.appendChild(root);
 
         const sBtn = document.createElement('div');
-        sBtn.style = `width:50px; height:50px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:2px solid #fff; border-radius:50%; cursor:pointer; box-shadow:0 4px 15px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;`;
-        sBtn.innerHTML = `<img src="https://i.ibb.co/mCvjPHqz/image.png" style="width:100%; height:100%; border-radius:50%; pointer-events:none;">`;
+        sBtn.style = `width:55px; height:55px; background:linear-gradient(135deg, #cc0000, #4a0000); border:2px solid #ff3333; border-radius:50%; cursor:pointer; box-shadow:0 0 20px rgba(255,0,0,0.5); display:flex; align-items:center; justify-content:center; overflow:hidden; transition: transform 0.2s;`;
+        sBtn.innerHTML = `<img src="${ICON_URL}" style="width:100%; height:100%; object-fit:cover; pointer-events:none;">`;
         root.appendChild(sBtn);
 
         const menu = document.createElement('div');
-        menu.style = `display:none; background:rgba(10,10,15,0.98); border:1px solid #00f2fe; padding:15px; border-radius:20px; width:310px; margin-top:10px; color:white; box-shadow:0 10px 30px rgba(0,0,0,0.6); backdrop-filter: blur(10px);`;
+        menu.style = `
+            display:none; 
+            background: rgba(20, 3, 3, 0.88); 
+            border: 1.5px solid #ff1a1a; 
+            padding: 16px; 
+            border-radius: 24px; 
+            width: 310px; 
+            margin-top: 12px; 
+            color: #ffcccc; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8), inset 0 0 15px rgba(255, 0, 0, 0.2); 
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+        `;
         
         menu.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="color:#00f2fe; font-weight:bold; font-size:13px;">👑 SLAX VIP TRANSLATOR V14.5</span>
-                <span id="ai-status" style="font-size:10px; color:#00ffcc; background: rgba(0,255,204,0.1); padding: 2px 8px; border-radius: 20px;">جاهز للعمل</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid rgba(255,26,26,0.3); padding-bottom:8px;">
+                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.5);">👑 SLAX RED ULTIMATE V15</span>
+                <span id="ai-status" style="font-size:10px; color:#ff3333; background: rgba(255,0,0,0.15); padding: 3px 10px; border-radius: 20px; font-weight:bold; border:0.5px solid rgba(255,26,26,0.4);">جاهز للعمل</span>
             </div>
 
-            <!-- إعدادات محرك الترجمة -->
-            <div style="background:#161622; padding:12px; border-radius:15px; margin-bottom:10px; border:1px solid #252538;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <span style="font-size:11px; color:#aaa;">طريقة العمل:</span>
-                    <select id="s-trans-mode" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; border-radius:6px; font-size:11px;">
-                        <option value="free">مجاني (دون توكنات + Google)</option>
-                        <option value="gemini">ذكاء اصطناعي (Gemini AI)</option>
+            <!-- إعدادات المترجم والتبييض الفوري -->
+            <div style="background:rgba(40, 5, 5, 0.7); padding:12px; border-radius:16px; margin-bottom:10px; border:1px solid rgba(255,26,26,0.25);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:11px; color:#ff8080;">طريقة الترجمة:</span>
+                    <select id="s-trans-mode" style="background:#150303; color:#ffcccc; border:1px solid #ff3333; padding:4px 8px; border-radius:8px; font-size:11px; outline:none; cursor:pointer;">
+                        <option value="free">مجاني (سريع + بدون توكنات)</option>
+                        <option value="gemini">ذكاء اصطناعي (Gemini Key)</option>
                     </select>
                 </div>
 
-                <div id="gemini-key-box" style="display:${translationMode === 'gemini' ? 'block' : 'none'}; margin-bottom:8px;">
-                    <input type="password" id="s-api-key" placeholder="أدخل مفتاح Gemini هنا..." value="${API_KEY}" style="width:90%; background:#000; color:#fff; border:1px solid #333; padding:6px; border-radius:8px; font-size:11px; outline:none; text-align:left;">
-                    <select id="s-model-select" style="width:100%; background:#000; color:#fff; border:1px solid #333; padding:6px; border-radius:8px; margin-top:5px; font-size:11px;">
-                        <option value="gemini-2.5-flash">gemini-2.5-flash (سريع ومجاني)</option>
-                        <option value="gemini-2.5-pro">gemini-2.5-pro (احترافي ودقيق)</option>
+                <div id="gemini-key-box" style="display:${translationMode === 'gemini' ? 'block' : 'none'}; margin-bottom:10px;">
+                    <input type="password" id="s-api-key" placeholder="مفتاح الـ Gemini..." value="${API_KEY}" style="width:92%; background:#150303; color:#fff; border:1px solid #ff3333; padding:8px; border-radius:8px; font-size:11px; outline:none; text-align:left;">
+                    <select id="s-model-select" style="width:100%; background:#150303; color:#ffcccc; border:1px solid #ff3333; padding:6px; border-radius:8px; margin-top:6px; font-size:11px; outline:none;">
+                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
                     </select>
                 </div>
 
-                <div id="ocr-lang-box" style="display:${translationMode === 'free' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <span style="font-size:11px; color:#aaa;">لغة الفصل الأصلية:</span>
-                    <select id="s-ocr-lang" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; border-radius:6px; font-size:11px;">
-                        <option value="eng">الإنجليزية (English)</option>
+                <div id="ocr-lang-box" style="display:${translationMode === 'free' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:11px; color:#ff8080;">لغة المانجا الأصلية:</span>
+                    <select id="s-ocr-lang" style="background:#150303; color:#ffcccc; border:1px solid #ff3333; padding:4px 8px; border-radius:8px; font-size:11px; outline:none; cursor:pointer;">
+                        <option value="eng">الإنجليزية (Default)</option>
                         <option value="kor">الكورية (Korean)</option>
                         <option value="jpn">اليابانية (Japanese)</option>
-                        <option value="chi_sim">الصينية المبسطة</option>
                     </select>
                 </div>
 
-                <button id="s-start-trans" style="width:100%; background:linear-gradient(135deg, #111, #222); border:1px solid #00ffcc; padding:10px; border-radius:10px; color:#00ffcc; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.3s;">🌐 ابدأ تبييض وترجمة المانجا (OFF)</button>
+                <button id="s-start-trans" style="width:100%; background:linear-gradient(135deg, #2a0000, #660000); border:1px solid #ff3333; padding:10px; border-radius:10px; color:#fff; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.3s; box-shadow:0 0 10px rgba(255,0,0,0.3);">🌐 تفعيل التبييض والترجمة الفورية (OFF)</button>
             </div>
 
             <div style="display:flex; gap:5px; margin-bottom:10px;">
-                <button id="s-go-search" style="background:#00f2fe; border:none; width:40px; border-radius:10px; color:#000; cursor:pointer;">🔍</button>
-                <input type="text" id="s-input" placeholder="بحث مانهوا.." style="flex:1; background:#000; color:#fff; border:1px solid #333; padding:8px; border-radius:10px; font-size:12px; outline:none;">
+                <button id="s-go-search" style="background:#ff1a1a; border:none; width:40px; border-radius:10px; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; box-shadow:0 0 5px rgba(255,0,0,0.3);">🔍</button>
+                <input type="text" id="s-input" placeholder="بحث مانهوا.." style="flex:1; background:#150303; color:#fff; border:1px solid #ff3333; padding:8px; border-radius:10px; font-size:12px; outline:none;">
             </div>
 
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-bottom:10px;">
-                 <button id="s-clean" style="background:rgba(0,242,254,0.1); border:1px solid #00f2fe; padding:8px; border-radius:10px; color:#00f2fe; font-size:11px; cursor:pointer;">🎬 تنظيف</button>
-                 <button id="s-scroll" style="background:#222; border:1px solid #444; padding:8px; border-radius:10px; color:white; font-size:11px; cursor:pointer;">⏯ تمرير آلي</button>
+                 <button id="s-clean" style="background:rgba(255,26,26,0.15); border:1px solid #ff1a1a; padding:8px; border-radius:10px; color:#ff6666; font-size:11px; cursor:pointer;">🎬 تنظيف الإعلانات</button>
+                 <button id="s-scroll" style="background:#222; border:1px solid #ff3333; padding:8px; border-radius:10px; color:white; font-size:11px; cursor:pointer;">⏯ تمرير آلي</button>
             </div>
 
             <div style="display:grid; grid-template-columns: 1fr 1.5fr 1fr; gap:5px; margin-bottom:10px;">
-                <button id="s-prev" style="background:#222; border:1px solid #333; padding:10px; border-radius:10px; font-size:11px; cursor:pointer;">السابق</button>
-                <button id="s-jump" style="background:#00f2fe; border:none; border-radius:10px; color:#000; font-weight:bold; cursor:pointer;">انتقال</button>
-                <button id="s-next" style="background:#222; border:1px solid #333; padding:10px; border-radius:10px; font-size:11px; cursor:pointer;">التالي</button>
+                <button id="s-prev" style="background:#222; border:1px solid #444; padding:10px; border-radius:10px; font-size:11px; cursor:pointer; color:white;">السابق</button>
+                <button id="s-jump" style="background:#ff1a1a; border:none; border-radius:10px; color:#fff; font-weight:bold; cursor:pointer; box-shadow:0 0 5px rgba(255,0,0,0.3);">انتقال</button>
+                <button id="s-next" style="background:#222; border:1px solid #444; padding:10px; border-radius:10px; font-size:11px; cursor:pointer; color:white;">التالي</button>
             </div>
 
-            <div style="background:rgba(0,0,0,0.4); padding:12px; border-radius:15px; border:1px solid #222;">
-                <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:10px; color:#ffcc00;"><span>سرعة التمرير</span><span id="v-speed">2</span></div><input type="range" id="r-speed" min="1" max="50" value="2" style="width:100%;"></div>
-                <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:10px; color:#00ffcc;"><span>التشبع %</span><span id="v-sat">100</span></div><input type="range" id="r-sat" min="50" max="250" value="100" style="width:100%;"></div>
-                <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:10px; color:#00f2fe;"><span>الوضوح %</span><span id="v-con">100</span></div><input type="range" id="r-con" min="50" max="200" value="100" style="width:100%;"></div>
-                <div><div style="display:flex; justify-content:space-between; font-size:10px; color:#ff4d4d;"><span>السطوع %</span><span id="v-bri">100</span></div><input type="range" id="r-bri" min="30" max="150" value="100" style="width:100%;"></div>
+            <div style="background:rgba(20,3,3,0.6); padding:12px; border-radius:16px; border:1px solid rgba(255,26,26,0.15);">
+                <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:10px; color:#ff9999;"><span>سرعة التمرير</span><span id="v-speed">2</span></div><input type="range" id="r-speed" min="1" max="50" value="2" style="width:100%; accent-color:#ff1a1a;"></div>
+                <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:10px; color:#ff3333;"><span>التشبع %</span><span id="v-sat">100</span></div><input type="range" id="r-sat" min="50" max="250" value="100" style="width:100%; accent-color:#ff1a1a;"></div>
+                <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:10px; color:#ff6666;"><span>الوضوح %</span><span id="v-con">100</span></div><input type="range" id="r-con" min="50" max="200" value="100" style="width:100%; accent-color:#ff1a1a;"></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:10px; color:#ff8080;"><span>السطوع %</span><span id="v-bri">100</span></div><input type="range" id="r-bri" min="30" max="150" value="100" style="width:100%; accent-color:#ff1a1a;"></div>
             </div>
         `;
         root.appendChild(menu);
 
-        // التفاعلات البرمجية
         const modeSelect = document.getElementById('s-trans-mode');
         const geminiBox = document.getElementById('gemini-key-box');
         const ocrBox = document.getElementById('ocr-lang-box');
@@ -387,7 +384,6 @@
         const apiKeyInput = document.getElementById('s-api-key');
         const modelSelect = document.getElementById('s-model-select');
 
-        // تحديث قيم الواجهة المبدئية
         langSelect.value = ocrLanguage;
         modelSelect.value = currentModel;
 
@@ -401,7 +397,7 @@
         langSelect.onchange = function() {
             ocrLanguage = this.value;
             saveSetting('ocr_lang', ocrLanguage);
-            showNotification(`تم تعيين لغة المسح الضوئي إلى: ${this.options[this.selectedIndex].text}`);
+            showNotification(`تم تغيير لغة المسح إلى: ${this.options[this.selectedIndex].text}`);
         };
 
         apiKeyInput.oninput = function() {
@@ -417,32 +413,32 @@
         startBtn.onclick = async function() {
             if (autoTranslateActive) {
                 autoTranslateActive = false;
-                this.style.background = "linear-gradient(135deg, #111, #222)";
-                this.style.color = "#00ffcc";
-                this.innerText = "🌐 ابدأ تبييض وترجمة المانجا (OFF)";
-                showNotification("تم إيقاف المترجم التلقائي.");
+                this.style.background = "linear-gradient(135deg, #2a0000, #660000)";
+                this.style.color = "#fff";
+                this.innerText = "🌐 تفعيل التبييض والترجمة الفورية (OFF)";
+                showNotification("تم إيقاف الترجمة الفورية.");
                 return;
             }
 
-            this.innerText = "⏳ جاري تحضير المحرك...";
+            this.innerText = "⏳ جاري تهيئة المحرك السريع...";
             try {
                 if (translationMode === 'free') {
                     await loadTesseract();
                 }
                 autoTranslateActive = true;
-                this.style.background = "linear-gradient(135deg, #02b389, #00ffcc)";
-                this.style.color = "#000";
-                this.innerText = "🌐 المترجم التلقائي نشط (ON)";
-                showNotification(`تم التفعيل بنجاح! جاري تنظيف وتبييض وترجمة الفصول فورياً.`);
+                this.style.background = "linear-gradient(135deg, #990000, #ff1a1a)";
+                this.style.color = "#fff";
+                this.innerText = "🌐 الترجمة الفورية نشطة (ON)";
+                showNotification("تم تفعيل نظام التبييض السريع وتعديل الخطوط التلقائي بنجاح!");
                 startTranslationPipeline();
             } catch (err) {
                 showNotification(err.message, "error");
                 this.style.background = "linear-gradient(135deg, #ff4d4d, #222)";
-                this.innerText = "❌ فشل التحضير";
+                this.innerText = "❌ فشل التحميل";
             }
         };
 
-        // فلاتر الصور
+        // تعديل فلاتر الصور
         const updateFilters = () => {
             const s = document.getElementById('r-sat').value;
             const c = document.getElementById('r-con').value;
@@ -458,13 +454,12 @@
         };
         ['r-sat', 'r-con', 'r-bri'].forEach(id => document.getElementById(id).oninput = updateFilters);
 
-        // فتح وإغلاق القائمة
         sBtn.onclick = () => menu.style.display = menu.style.display === "none" ? "block" : "none";
 
-        // تنظيف الصفحة
+        // تنظيف الصفحة من الإعلانات
         document.getElementById('s-clean').onclick = () => {
-            document.querySelectorAll('header, footer, .ads, #header, iframe, .side-banners').forEach(e => e.remove());
-            showNotification("تم تنظيف الإعلانات وعناصر التشتيت!");
+            document.querySelectorAll('header, footer, .ads, #header, iframe, .side-banners, .webtoon-side-ads').forEach(e => e.remove());
+            showNotification("تم إزالة الإعلانات والعناصر غير الضرورية!");
         };
 
         // التمرير التلقائي
@@ -479,13 +474,13 @@
                 scrollInterval = setInterval(() => {
                     window.scrollBy(0, parseInt(document.getElementById('r-speed').value));
                 }, 20);
-                this.style.background = "#00f2fe";
-                this.style.color = "#000";
+                this.style.background = "#ff1a1a";
+                this.style.color = "#fff";
             }
         };
         document.getElementById('r-speed').oninput = (e) => document.getElementById('v-speed').innerText = e.target.value;
 
-        // ميزة البحث السريع
+        // محرك البحث
         document.getElementById('s-go-search').onclick = function() {
             const query = document.getElementById('s-input').value;
             if (query) {
@@ -493,7 +488,7 @@
             }
         };
 
-        // سحب وحفظ موقع الأيقونة للهواتف واللمس
+        // التحكم بالسحب والتحريك على الشاشة باللمس
         let isDragging = false, startX, startY;
         sBtn.ontouchstart = (e) => {
             isDragging = true;
