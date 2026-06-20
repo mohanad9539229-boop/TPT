@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SLAX VIP V16.5 - Anti-Gibberish & Smart Font
+// @name         SLAX VIP V17.0 - Infinite Translation Stability
 // @namespace    https://viayoo.com/
-// @version      16.5
-// @description  حل مشكلة طلاسم الحروف الإنجليزية، تبييض كبسولي متناسق، شريط تحكم مباشر بحجم الخط، واجهة زجاجية حمراء داكنة فاخرة.
+// @version      17.0
+// @description  حل مشاكل عدم الترجمة العشوائية، تبييض كبسولي دقيق على قد النص، فلترة شاملة للرموز الغريبة والطلاسم، شريط تحكم مباشر بالخط، واجهة حمراء داكنة زجاجية.
 // @author       Slax
 // @run-at       document-start
 // @match        *://*.webtoons.com/*
@@ -14,8 +14,8 @@
 (function() {
     'use strict';
 
-    // إعدادات مستمرة لحفظ تفضيلات المستخدم تلقائياً
-    const STORAGE_PREFIX = "slax_v16_5_";
+    // مساحة تخزين الإعدادات المخصصة لـ Slax وحفظها بشكل آمن على جميع المواقع
+    const STORAGE_PREFIX = "slax_v17_";
     const getSetting = (key, fallback) => localStorage.getItem(STORAGE_PREFIX + key) || fallback;
     const saveSetting = (key, val) => localStorage.setItem(STORAGE_PREFIX + key, val);
 
@@ -23,17 +23,17 @@
     let currentModel = getSetting('model', 'gemini-2.5-flash');
     let translationMode = getSetting('mode', 'free'); // 'free' أو 'gemini'
     let ocrLanguage = getSetting('ocr_lang', 'eng');
-    let fontSizeScale = parseFloat(getSetting('font_scale', '1.0')); // مقياس حجم الخط الافتراضي
+    let fontSizeScale = parseFloat(getSetting('font_scale', '1.0')); 
     let autoTranslateActive = false;
     let isProcessing = false;
 
-    // محرك نصوص عالمي موحد فائق السرعة لتقليل وقت المعالجة
+    // محرك نصوص عالمي موحد فائق السرعة
     let globalTesseractWorker = null;
 
     const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
     const ICON_URL = "https://i.ibb.co/nMBFJ7kV/image.png";
 
-    // تهيئة محرك النصوص لمرة واحدة فقط لمنع التعليق والبطء
+    // تهيئة محرك النصوص لمرة واحدة فقط لمنع التعليق
     async function initGlobalTesseract() {
         if (globalTesseractWorker) return;
         
@@ -42,7 +42,7 @@
                 const script = document.createElement('script');
                 script.src = TESSERACT_CDN;
                 script.onload = () => resolve();
-                script.onerror = () => reject(new Error("فشل تحميل محرك النصوص. تحقق من الإنترنت."));
+                script.onerror = () => reject(new Error("فشل تحميل محرك النصوص. تحقق من اتصالك بالإنترنت."));
                 document.head.appendChild(script);
             });
         }
@@ -50,7 +50,7 @@
         globalTesseractWorker = await Tesseract.createWorker(ocrLanguage);
     }
 
-    // إغلاق المحرك لتحرير ذاكرة المتصفح
+    // إغلاق المحرك لتحرير الرام
     async function terminateGlobalTesseract() {
         if (globalTesseractWorker) {
             await globalTesseractWorker.terminate();
@@ -58,31 +58,40 @@
         }
     }
 
-    // جلب ملفات الصور بأمان لتجاوز حماية المواقع (Bypass Referer)
+    // جلب الصور بأمان مع إصلاح بروتوكولات الرابط وتفادي الحماية
     async function getImageBlob(url) {
+        let cleanUrl = url.trim();
+        if (cleanUrl.startsWith('//')) {
+            cleanUrl = window.location.protocol + cleanUrl;
+        }
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "GET",
-                url: url,
+                url: cleanUrl,
                 responseType: "blob",
-                headers: { "Referer": location.origin },
-                onload: (res) => resolve(res.response),
-                onerror: () => reject()
+                headers: { "Referer": window.location.origin },
+                onload: (res) => {
+                    if (res.status >= 200 && res.status < 300) {
+                        resolve(res.response);
+                    } else {
+                        reject(new Error("فشل استجابة الشبكة لجلب الصورة"));
+                    }
+                },
+                onerror: () => reject(new Error("خطأ اتصال أثناء جلب الصورة"))
             });
         });
     }
 
-    // 1. فلتر تطهير النصوص الإنجليزية والرموز قبل الإرسال لمنع استهلاك المترجم
+    // فلتر تنظيف النصوص قبل إرسالها للترجمة لمنع استهلاك الذاكرة والطلاسم
     function cleanOcrText(text) {
         if (!text) return "";
-        let cleaned = text.replace(/[^a-zA-Z0-9\s]/g, ' '); // مسح الرموز والشخطات
-        cleaned = cleaned.replace(/([a-zA-Z])\1{2,}/g, ''); // مسح الحروف المتكررة الناتجة عن الرسومات
+        let cleaned = text.replace(/[^a-zA-Z0-9\s]/g, ' '); 
+        cleaned = cleaned.replace(/([a-zA-Z])\1{2,}/g, ''); 
         cleaned = cleaned.trim().replace(/\s+/g, ' ');
 
         if (cleaned.length < 3) return "";
-        if (/^\d+$/.test(cleaned)) return ""; // تجاهل الأرقام الصرفة
+        if (/^\d+$/.test(cleaned)) return ""; 
 
-        // التحقق من الحروف الصوتية لضمان أنها كلمات حقيقية وليست طلاسم رسمية
         if (ocrLanguage === 'eng') {
             const hasVowel = /[aeiouyAEIOUY]/i.test(cleaned);
             if (!hasVowel) return "";
@@ -90,19 +99,16 @@
         return cleaned;
     }
 
-    // 2. فلتر التطهير النهائي للترجمة العربية (Arabic-Only Sanitizer) لمنع طلاسم الصورة تماماً
+    // فلتر التطهير النهائي للنص العربي لإزالة الحروف الإنجليزية العشوائية تماماً (حل مشكلة الصورة)
     function sanitizeFinalArabicTranslation(text) {
         if (!text) return "";
-        // إزالة أي حروف إنجليزية عشوائية متبقية تماماً من النص العربي المترجم
         let sanitized = text.replace(/[a-zA-Z]/g, '');
-        // إزالة الشخطات والرموز الزائدة
         sanitized = sanitized.replace(/[_\-\|\\\/~`@#\$\^&\*\+=\{\}\[\];<>:"]/g, ' ');
-        // تنظيف المسافات الزائدة
         sanitized = sanitized.trim().replace(/\s+/g, ' ');
         return sanitized;
     }
 
-    // دمج نصوص الصفحة وإرسالها بطلب واحد لتجنب الحظر والبطء الشديد
+    // دمج نصوص المانجا في طلب واحد مجاني ومستقر لمنع الحظر والبطء
     async function translateTextBundle(textsArray, fromLang) {
         if (!textsArray || textsArray.length === 0) return [];
 
@@ -135,7 +141,6 @@
                             if (original === "") return "";
                             const trans = translatedParts[idx] || "";
                             if (trans.includes("SKIP_EMPTY_INDEX")) return "";
-                            // غسيل وتطهير النص العربي المترجم لمنع طلاسم الصورة
                             return sanitizeFinalArabicTranslation(trans);
                         });
                         
@@ -149,7 +154,7 @@
         });
     }
 
-    // إشعارات الأداة الزجاجية المتوهجة باللون الأحمر
+    // نظام إشعارات Slax باللون الأحمر الفاخر المتوهج
     function showNotification(msg, type = "info") {
         const notif = document.createElement('div');
         notif.style = `
@@ -171,32 +176,63 @@
         }, 3000);
     }
 
-    // تبييض كبسولي فوري "على قد النص" وتنسيق الأبعاد لمنع التمدد المشوه
+    // تبييض كبسولي فوري فائق الاستقرار لحل مشاكل عدم الترجمة
     async function processImage(img) {
         if (img.dataset.ocrProcessed) return;
         img.dataset.ocrProcessed = "processing";
 
+        // حل مشكلة Race Condition: الانتظار التام لحين اكتمال تحميل الصورة بالكامل ومعرفة أبعادها
+        if (!img.complete || img.naturalWidth === 0) {
+            await new Promise((resolve) => {
+                img.onload = () => resolve();
+                img.onerror = () => resolve(); // المتابعة حتى في حال حدوث خطأ لمنع تجميد الأنبوب
+            });
+        }
+
+        // تخطي الصور الصغيرة جداً والتالفة (التي قد تسبب توقف الأداة)
+        if (img.clientWidth < 150 || img.clientHeight < 150) {
+            img.dataset.ocrProcessed = "skipped-too-small";
+            return;
+        }
+
         const infoBadge = document.createElement('div');
-        infoBadge.innerText = "⚡ جاري التبييض والترجمة الفورية...";
+        infoBadge.innerText = "⚡ جاري التبييض والترجمة...";
         infoBadge.style = "position:absolute; background:rgba(120,5,5,0.92); color:#fff; font-size:10px; padding:4px 8px; border-radius:6px; z-index:99; font-family:sans-serif; pointer-events:none; left:10px; top:10px; border:1px solid #ff3333; box-shadow: 0 0 10px rgba(255,0,0,0.3);";
         
         try {
-            const blob = await getImageBlob(img.src);
-            const blobUrl = URL.createObjectURL(blob);
-            
-            const tempImg = new Image();
-            tempImg.crossOrigin = "anonymous";
-            await new Promise((res, rej) => {
-                tempImg.onload = res;
-                tempImg.onerror = rej;
-                tempImg.src = blobUrl;
-            });
-
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = tempImg.naturalWidth;
-            canvas.height = tempImg.naturalHeight;
-            ctx.drawImage(tempImg, 0, 0);
+            let imageSourceLoaded = false;
+
+            // محاولة أولى بديلة ذكية: جلب الصورة بالشبكة للحصول على دقة كاملة
+            try {
+                const blob = await getImageBlob(img.src);
+                const blobUrl = URL.createObjectURL(blob);
+                
+                const tempImg = new Image();
+                tempImg.crossOrigin = "anonymous";
+                await new Promise((res, rej) => {
+                    tempImg.onload = res;
+                    tempImg.onerror = rej;
+                    tempImg.src = blobUrl;
+                });
+
+                canvas.width = tempImg.naturalWidth;
+                canvas.height = tempImg.naturalHeight;
+                ctx.drawImage(tempImg, 0, 0);
+                imageSourceLoaded = true;
+            } catch (networkError) {
+                console.warn("فشل جلب الصورة بالشبكة، محاولة النسخ المباشر من عنصر الصفحة...", networkError);
+                // محاولة ثانية: نسخ الصورة المعروضة مباشرة من المتصفح إلى الكانفاس لتخطي الحماية
+                canvas.width = img.naturalWidth || img.clientWidth;
+                canvas.height = img.naturalHeight || img.clientHeight;
+                ctx.drawImage(img, 0, 0);
+                imageSourceLoaded = true;
+            }
+
+            if (!imageSourceLoaded) {
+                throw new Error("فشل تحميل مصدر الصورة للترجمة");
+            }
 
             const wrapper = document.createElement('div');
             wrapper.className = "slax-ocr-wrapper";
@@ -226,11 +262,7 @@
                     infoBadge.remove();
                     return;
                 }
-                const base64Data = await new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                    reader.readAsDataURL(blob);
-                });
+                const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
 
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${API_KEY}`, {
                     method: "POST",
@@ -267,20 +299,17 @@
                     const bbox = p.bbox;
                     const arabicTranslation = translatedTexts[index];
                     
-                    // إذا تصفى النص تماماً كرموز فارغة، نتجاوز عرضه للحفاظ على نظافة الصفحة
                     if (!bbox || !arabicTranslation || arabicTranslation.trim().length === 0) return;
 
                     const width = (bbox.x1 - bbox.x0) * scaleX;
                     const height = (bbox.y1 - bbox.y0) * scaleY;
 
-                    // حساب حجم خط ذكي يتأثر يدوياً وديناميكياً مع حد أدنى لسهولة القراءة
                     let baseFontSize = Math.min(13, Math.max(10, (height * 0.15) + (width * 0.025)));
                     let finalFontSize = baseFontSize * fontSizeScale;
 
                     const left = bbox.x0 * scaleX;
                     const top = bbox.y0 * scaleY;
 
-                    // الحاوية الخارجية
                     const textContainer = document.createElement('div');
                     textContainer.className = "slax-translated-container";
                     textContainer.style = `
@@ -297,7 +326,7 @@
                         box-sizing: border-box;
                     `;
 
-                    // كبسولة التبييض المصممة "على قد النص بالضبط" مع منع التمدد الطويل المشوه
+                    // كبسولة التبييض المرنة "على قد النص بالضبط" لمنع تمدد النص والطلاسم
                     const bubble = document.createElement('div');
                     bubble.className = "slax-compact-bubble";
                     bubble.style = `
@@ -312,7 +341,7 @@
                         overflow: hidden;
                         text-align: center;
                         word-break: break-word;
-                        white-space: normal; /* إجبار النص على الالتفاف والنزول لسطر جديد */
+                        white-space: normal;
                         color: #000000;
                         font-family: system-ui, -apple-system, sans-serif;
                         font-weight: 800;
@@ -337,12 +366,17 @@
         }
     }
 
-    // تدفق المعالجة للصفحات غير المترجمة بالترتيب
+    // أنبوب التدفق الدائري للمزامنة ومعالجة الصور بالصفحة
     async function startTranslationPipeline() {
         if (!autoTranslateActive || isProcessing) return;
         isProcessing = true;
 
-        const imgs = Array.from(document.querySelectorAll('img:not([data-ocr-processed])')).filter(i => i.clientHeight > 220);
+        const imgs = Array.from(document.querySelectorAll('img:not([data-ocr-processed])')).filter(i => {
+            // تخطي عناصر الواجهة البرمجية الخاصة بالأداة Slax
+            if (i.closest('#slax-root')) return false;
+            return true;
+        });
+
         if (imgs.length > 0) {
             const statusEl = document.getElementById('ai-status');
             if (statusEl) statusEl.innerText = `🔄 معالجة ${imgs.length} صفحة...`;
@@ -355,18 +389,6 @@
         }
         isProcessing = false;
         setTimeout(startTranslationPipeline, 1500);
-    }
-
-    // تحديث ديناميكي فوري لحجم خط جميع الترجمات على الشاشة بمجرد تحريك السلايدر
-    function updateAllFonts() {
-        document.querySelectorAll('.slax-compact-bubble').forEach(bubble => {
-            // استخراج الحجم الأصلي وإعادة احتسابه بناءً على المقياس الجديد
-            let currentSize = parseFloat(bubble.style.fontSize);
-            if (currentSize) {
-                // إعادة التقييم من الحجم الأساسي المخزن أو تعديله مباشرة
-                bubble.style.fontSize = `${(currentSize / fontSizeScale) * parseFloat(getSetting('font_scale', '1.0'))}px`;
-            }
-        });
     }
 
     // بناء واجهة الأداة الحمراء الزجاجية الأنيقة جداً
@@ -400,7 +422,7 @@
         
         menu.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1.5px solid rgba(255,26,26,0.35); padding-bottom:8px;">
-                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.6);">👑 SLAX COMPACT OCR V16.5</span>
+                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.6);">👑 SLAX COMPACT OCR V17.0</span>
                 <span id="ai-status" style="font-size:10px; color:#ff3333; background: rgba(255,0,0,0.18); padding: 3px 10px; border-radius: 20px; font-weight:bold; border:0.5px solid rgba(255,26,26,0.4);">جاهز للعمل</span>
             </div>
 
@@ -431,7 +453,7 @@
                     </select>
                 </div>
 
-                <!-- ميزة التحكم الذكي واليدوي بحجم الخط الجديد لسهولة القراءة -->
+                <!-- مقياس تعديل الخط -->
                 <div style="margin-top:10px; border-top:1px dashed rgba(255,26,26,0.2); padding-top:8px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; font-size:11px; color:#ff8080; margin-bottom:4px;">
                         <span>تعديل حجم خط الترجمة:</span>
@@ -499,14 +521,13 @@
             }
         };
 
-        // تفاعلات شريط التحكم بحجم الخط المباشر
+        // تغيير حجم خط الترجمة فوراً وتحديث التفضيلات المحفوظة
         fontScaleSlider.oninput = function() {
             const oldScale = fontSizeScale;
             fontSizeScale = parseFloat(this.value);
             fontScaleValue.innerText = `${fontSizeScale}x`;
             saveSetting('font_scale', fontSizeScale);
             
-            // تطبيق فوري لحجم الخط على جميع الفقاعات المترجمة حالياً
             document.querySelectorAll('.slax-compact-bubble').forEach(bubble => {
                 let currentSize = parseFloat(bubble.style.fontSize);
                 if (currentSize) {
@@ -545,7 +566,7 @@
                 this.style.background = "linear-gradient(135deg, #a00000, #ff1a1a)";
                 this.style.color = "#fff";
                 this.innerText = "🌐 الترجمة الفورية نشطة (ON)";
-                showNotification("تم تفعيل نظام التبييض المصغر 'على قد النص' وتصفية الطلاسم بنجاح!");
+                showNotification("تم تفعيل نظام التبييض والمحرك ذو الاستقرار اللانهائي بنجاح!");
                 startTranslationPipeline();
             } catch (err) {
                 showNotification(err.message, "error");
@@ -554,7 +575,7 @@
             }
         };
 
-        // فلاتر المانجا الفنية لراحة العين والتشبع
+        // فلاتر الصور
         const updateFilters = () => {
             const s = document.getElementById('r-sat').value;
             const c = document.getElementById('r-con').value;
@@ -572,13 +593,13 @@
 
         sBtn.onclick = () => menu.style.display = menu.style.display === "none" ? "block" : "none";
 
-        // تنظيف وحذف العناصر المشوشة والإعلانات والبنرات
+        // تنظيف الصفحة
         document.getElementById('s-clean').onclick = () => {
             document.querySelectorAll('header, footer, .ads, #header, iframe, .side-banners, .webtoon-side-ads').forEach(e => e.remove());
             showNotification("تم تصفية وتنظيف عناصر الصفحة بنجاح!");
         };
 
-        // تفعيل حركة التمرير الآلي لقصص الويب تون الطويلة
+        // التمرير التلقائي
         let scrollInterval = null;
         document.getElementById('s-scroll').onclick = function() {
             if (scrollInterval) {
@@ -596,7 +617,7 @@
         };
         document.getElementById('r-speed').oninput = (e) => document.getElementById('v-speed').innerText = e.target.value;
 
-        // شريط البحث المدمج في الأداة
+        // شريط البحث
         document.getElementById('s-go-search').onclick = function() {
             const query = document.getElementById('s-input').value;
             if (query) {
@@ -604,7 +625,7 @@
             }
         };
 
-        // نظام السحب والتحريك باللمس المطور للهواتف والأجهزة اللوحية لحفظ موقع الأداة
+        // السحب والتحريك باللمس
         let isDragging = false, startX, startY;
         sBtn.ontouchstart = (e) => {
             isDragging = true;
