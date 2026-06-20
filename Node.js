@@ -1,4 +1,3 @@
-```javascript
 // ==UserScript==
 // @name         SLAX VIP V15.0 - Fast Dark Red OCR & Translator
 // @namespace    https://viayoo.com/
@@ -512,5 +511,3 @@
 
     setTimeout(createSlaxUI, 1200);
 })();
-
-```
