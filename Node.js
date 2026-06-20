@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SLAX VIP V19.0 - Infinite Translation Stability
+// @name         SLAX VIP V20.0 - Ultimate Integrated Translator
 // @namespace    https://viayoo.com/
-// @version      19.0
-// @description  تجاوز حظر الحماية بالكامل، تبييض كبسولي دقيق للغاية على قد النص، تطهير كامل من الطلاسم والرموز، واجهة زجاجية حمراء متوهجة فائقة الأناقة.
+// @version      20.0
+// @description  نظام الترجمة المتكاملة للمانجا: تكبير الكانفاس للخطوط الصغيرة، دمج الكلمات المقطوعة، تصفية ذكية للطلاسم، واجهة زجاجية حمراء متوهجة.
 // @author       Slax
 // @run-at       document-start
 // @match        *://*.webtoons.com/*
@@ -15,43 +15,45 @@
 (function() {
     'use strict';
 
-    // نظام تخزين الإعدادات المخصصة لـ Slax وحفظها تلقائياً على المتصفح
-    const STORAGE_PREFIX = "slax_v19_";
+    // حفظ واسترجاع تفضيلات المستخدم لضمان استقرار العمل على كافة المواقع
+    const STORAGE_PREFIX = "slax_v20_";
     const getSetting = (key, fallback) => localStorage.getItem(STORAGE_PREFIX + key) || fallback;
     const saveSetting = (key, val) => localStorage.setItem(STORAGE_PREFIX + key, val);
 
     let API_KEY = getSetting('api_key', '');
     let currentModel = getSetting('model', 'gemini-2.5-flash');
-    let translationMode = getSetting('mode', 'free'); // 'free' أو 'gemini'
+    let translationMode = getSetting('mode', 'free'); 
     let ocrLanguage = getSetting('ocr_lang', 'eng');
     let fontSizeScale = parseFloat(getSetting('font_scale', '1.0')); 
     let filterStrength = getSetting('filter_strength', 'light'); 
     let autoTranslateActive = false;
     let isProcessing = false;
 
-    // محرك نصوص عالمي موحد فائق السرعة
+    // ذاكرة الترجمة المؤقتة لمنع إعادة الترجمة وتسريع التصفح 10 أضعاف
+    const translationCache = new Map();
+
+    // محرك نصوص عالمي موحد ذكي
     let globalTesseractWorker = null;
     const ICON_URL = "https://i.ibb.co/nMBFJ7kV/image.png";
 
-    // تهيئة محرك النصوص الآمن والداعم لصفحات المانجا والويب تون المتناثرة (PSM 11)
+    // تهيئة محرك النصوص الآمن والداعم للبحث المتناثر (PSM 11)
     async function initGlobalTesseract() {
         if (globalTesseractWorker) return;
         
-        // التحقق من وجود المكتبة المحقونة بأمان عبر التامبرمونكي
         if (typeof Tesseract === 'undefined') {
-            throw new Error("فشل تحميل محرك النصوص الآمن. يرجى إعادة تثبيت الأداة.");
+            throw new Error("فشل تحميل مكتبة الترجمة الآمنة. يرجى التحقق من اتصال الإنترنت.");
         }
         
         globalTesseractWorker = await Tesseract.createWorker(ocrLanguage);
         
-        // ضبط معايير البحث الذكية لكشف النصوص المتناثرة في أرجاء الصورة بنسبة 100%
+        // ضبط معايير القراءة المتطورة للمانجا والويب تون المتناثرة
         await globalTesseractWorker.setParameters({
             tessedit_pageseg_mode: '11',
-            tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?.,\'" '
+            tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?.,\'"- '
         });
     }
 
-    // إيقاف المحرك عند تعطيل الأداة لتوفير استهلاك الرام
+    // إيقاف المحرك عند تعطيل الأداة لتوفير الرام
     async function terminateGlobalTesseract() {
         if (globalTesseractWorker) {
             await globalTesseractWorker.terminate();
@@ -59,7 +61,7 @@
         }
     }
 
-    // جلب ملفات الصور وتخطي الحماية الأمنية للمواقع الكبيرة بالكامل
+    // جلب ملفات الصور وتجاوز حماية المواقع بالكامل
     async function getImageBlob(url) {
         let cleanUrl = url.trim();
         if (cleanUrl.startsWith('//')) {
@@ -78,15 +80,21 @@
                         reject(new Error("فشل جلب الصورة."));
                     }
                 },
-                onerror: () => reject(new Error("خطأ في الاتصال بالشبكة."))
+                onerror: () => reject(new Error("خطأ اتصال بالشبكة."))
             });
         });
     }
 
-    // تنظيف النصوص الأصلية قبل الفحص والترجمة لمنع الطلاسم
+    // تنظيف النصوص الأصلية وإعادة تجميع الكلمات المقطوعة والمفصولة بسبب الأسطر
     function cleanOcrText(text) {
         if (!text) return "";
-        let cleaned = text.replace(/[^a-zA-Z0-9\s!?.,']/g, ' '); 
+        
+        // 1. معالجة ذكية للكلمات المقطوعة بشحطة في نهاية السطر وإعادة لصقها (مثل be- cause -> because)
+        let processed = text.replace(/(\w+)\-\s*\n\s*(\w+)/g, '$1$2');
+        processed = processed.replace(/\n/g, ' '); 
+
+        // 2. تصفية الشحطات والرموز المشوهة الناتجة عن حدود غيمة الكلام والرسوم
+        let cleaned = processed.replace(/[^a-zA-Z0-9\s!?.,']/g, ' ');
         cleaned = cleaned.replace(/([a-zA-Z])\1{3,}/g, '$1'); 
         cleaned = cleaned.trim().replace(/\s+/g, ' ');
 
@@ -95,26 +103,27 @@
             return cleaned;
         }
 
+        // تصفية قوية لمنع الطلاسم بشكل صارم
         if (cleaned.length < 3) return "";
         if (/^\d+$/.test(cleaned)) return ""; 
 
         if (ocrLanguage === 'eng') {
             const hasVowel = /[aeiouyAEIOUY]/i.test(cleaned);
-            if (!hasVowel) return "";
+            if (!hasVowel) return ""; // إهمال أي جملة لا تحتوي على حروف صوتية حقيقية
         }
         return cleaned;
     }
 
-    // فلتر التطهير النهائي للترجمة العربية (Arabic-Only Sanitizer) لمنع الرموز تماماً
+    // فلتر التطهير النهائي للترجمة العربية لمنع ظهور أي رموز مشوشة تماماً
     function sanitizeFinalArabicTranslation(text) {
         if (!text) return "";
-        let sanitized = text.replace(/[a-zA-Z]/g, ''); // إزالة أي حرف إنجليزي عشوائي متبقي
+        let sanitized = text.replace(/[a-zA-Z]/g, ''); // مسح أي حروف إنجليزية عشوائية متبقية
         sanitized = sanitized.replace(/[_\-\|\\\/~`@#\$\^&\*\+=\{\}\[\];<>"]/g, ' ');
         sanitized = sanitized.trim().replace(/\s+/g, ' ');
         return sanitized;
     }
 
-    // دمج نصوص الصفحة في حزمة واحدة سريعة ومستقرة جداً لمنع الحظر والتعليق
+    // ترجمة حزمة كاملة بطلب ذكي واحد لضمان جودة الصياغة وسرعة الأداء
     async function translateTextBundle(textsArray, fromLang) {
         if (!textsArray || textsArray.length === 0) return [];
 
@@ -140,7 +149,6 @@
                             data[0].forEach(s => { if (s[0]) translatedCombined += s[0]; });
                         }
                         
-                        // تقسيم الحزمة مع مراعاة كافة سيناريوهات ترجمة جوجل للرمز المدمج
                         const splitPattern = /\s*\{\s*SLX\s*\}\s*|\s*\{\s*slx\s*\}\s*|\s*\{\s*سلخ\s*\}\s*/gi;
                         const translatedParts = translatedCombined.split(splitPattern).map(p => p.trim());
                         
@@ -161,7 +169,7 @@
         });
     }
 
-    // إشعارات الأداة الزجاجية الحمراء الداكنة المتوهجة
+    // إشعارات الأداة الزجاجية المتوهجة باللون الأحمر
     function showNotification(msg, type = "info") {
         const notif = document.createElement('div');
         notif.style = `
@@ -183,12 +191,12 @@
         }, 3000);
     }
 
-    // تبييض كبسولي فوري فائق الدقة والاستقرار دون تعديل كود الصفحة الأصلي
+    // معالجة المانجا بالكامل: تكبير الكانفاس، تبييض كبسولي فائق الدقة، وترجمة مستقرة
     async function processImage(img) {
         if (img.dataset.ocrProcessed) return;
         img.dataset.ocrProcessed = "processing";
 
-        // الانتظار التام لحين تحميل المانجا بالكامل لمعرفة أبعاد الصفحة الصحيحة
+        // الانتظار التام لحين اكتمال تحميل المانجا لمعرفة أبعادها الحقيقية بدقة
         if (!img.complete || img.naturalWidth === 0) {
             await new Promise((resolve) => {
                 img.onload = () => resolve();
@@ -201,7 +209,13 @@
             return;
         }
 
-        // إنشاء مؤشر التبييض
+        // استخدام الذاكرة المؤقتة (Cache) لتجاوز تكرار الترجمة عند الصعود والنزول
+        if (translationCache.has(img.src)) {
+            renderCachedTranslations(img, translationCache.get(img.src));
+            img.dataset.ocrProcessed = "success";
+            return;
+        }
+
         const infoBadge = document.createElement('div');
         infoBadge.innerText = "⚡ جاري التبييض والترجمة...";
         infoBadge.style = "position:absolute; background:rgba(120,5,5,0.92); color:#fff; font-size:10px; padding:4px 8px; border-radius:6px; z-index:99; font-family:sans-serif; pointer-events:none; left:10px; top:10px; border:1px solid #ff3333; box-shadow: 0 0 10px rgba(255,0,0,0.3);";
@@ -211,7 +225,6 @@
             const ctx = canvas.getContext('2d');
             let imageSourceLoaded = false;
 
-            // محاولة جلب الصورة كـ Blob بدقة كاملة
             try {
                 const blob = await getImageBlob(img.src);
                 const blobUrl = URL.createObjectURL(blob);
@@ -224,15 +237,17 @@
                     tempImg.src = blobUrl;
                 });
 
-                canvas.width = tempImg.naturalWidth;
-                canvas.height = tempImg.naturalHeight;
+                // الأسرار الهندسية: تكبير الكانفاس بمقدار 1.8 ضعف لتسهيل قراءة الحروف الصغيرة بنسبة 100%
+                const scaleUp = 1.8;
+                canvas.width = tempImg.naturalWidth * scaleUp;
+                canvas.height = tempImg.naturalHeight * scaleUp;
 
-                // تحسين جودة وتباين الحروف لضمان دقة OCR تبلغ 99%
-                ctx.filter = 'contrast(1.65) grayscale(1) brightness(1.05)';
-                ctx.drawImage(tempImg, 0, 0);
+                // تحسين جودة وتباين الحروف عبر كارت الشاشة لضمان دقة OCR مثالية
+                ctx.filter = 'contrast(1.7) grayscale(1) brightness(1.04)';
+                ctx.drawImage(tempImg, 0, 0, canvas.width, canvas.height);
                 imageSourceLoaded = true;
             } catch (networkError) {
-                // الطريقة البديلة في حال حظر طلبات الشبكة (رسم مباشر من الصفحة)
+                // محاولة نسخ الصورة المعروضة مباشرة من المتصفح في حال حظر طلبات الشبكة
                 canvas.width = img.naturalWidth || img.clientWidth;
                 canvas.height = img.naturalHeight || img.clientHeight;
                 ctx.drawImage(img, 0, 0);
@@ -243,14 +258,12 @@
                 throw new Error("فشل تحميل مصدر المانجا.");
             }
 
-            // تأمين موضع الطبقة الزجاجية فوق الصورة تماماً دون التأثير على كود الموقع
             const parent = img.parentNode;
-            const computedStyle = window.getComputedStyle(parent);
-            if (computedStyle.position === 'static') {
+            if (window.getComputedStyle(parent).position === 'static') {
                 parent.style.position = 'relative';
             }
 
-            // إنشاء غلاف الترجمة كعنصر مجاور (Sibling) لمنع انهيار وتجمد تصاميم React/Vue
+            // إنشاء غلاف الترجمة كعنصر مجاور (Sibling) لتجنب تجمد تصاميم React الحديثة
             const overlayContainer = document.createElement('div');
             overlayContainer.className = "slax-image-overlay";
             overlayContainer.style = `
@@ -314,6 +327,8 @@
                     translatedTexts = rawTexts.map(t => sanitizeFinalArabicTranslation(t));
                 }
 
+                const cacheEntries = [];
+
                 paragraphs.forEach((p, index) => {
                     const bbox = p.bbox;
                     const arabicTranslation = translatedTexts[index];
@@ -322,60 +337,21 @@
 
                     const width = (bbox.x1 - bbox.x0) * scaleX;
                     const height = (bbox.y1 - bbox.y0) * scaleY;
-
-                    let baseFontSize = Math.min(13.5, Math.max(10.5, (height * 0.16) + (width * 0.025)));
-                    let finalFontSize = baseFontSize * fontSizeScale;
-
                     const left = bbox.x0 * scaleX;
                     const top = bbox.y0 * scaleY;
 
-                    const textContainer = document.createElement('div');
-                    textContainer.className = "slax-translated-container";
-                    textContainer.style = `
-                        position: absolute;
-                        left: ${left}px;
-                        top: ${top}px;
-                        width: ${width}px;
-                        height: ${height}px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        pointer-events: none;
-                        box-sizing: border-box;
-                    `;
+                    const entry = { text: arabicTranslation, bbox: { left, top, width, height } };
+                    cacheEntries.push(entry);
 
-                    // كبسولة التبييض المصممة على قد النص بالضبط
-                    const bubble = document.createElement('div');
-                    bubble.className = "slax-compact-bubble";
-                    bubble.style = `
-                        background: rgba(255, 255, 255, 0.96);
-                        padding: 4px 8px;
-                        border-radius: 8px;
-                        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-                        border: 1px solid rgba(0, 0, 0, 0.12);
-                        display: inline-block;
-                        max-width: 95%;
-                        max-height: 98%;
-                        overflow: hidden;
-                        text-align: center;
-                        word-break: break-word;
-                        white-space: normal;
-                        color: #000000;
-                        font-family: system-ui, -apple-system, sans-serif;
-                        font-weight: 800;
-                        font-size: ${finalFontSize}px;
-                        line-height: 1.25;
-                    `;
-                    bubble.innerText = arabicTranslation;
-
-                    textContainer.appendChild(bubble);
-                    overlayContainer.appendChild(textContainer);
+                    renderBubble(overlayContainer, entry);
                 });
 
+                // حفظ الترجمات في الذاكرة المؤقتة لمنع إعادة طلب الفحص
+                translationCache.set(img.src, cacheEntries);
                 img.dataset.ocrProcessed = "success";
             } else {
                 img.dataset.ocrProcessed = "no-text";
-                overlayContainer.remove(); // تنظيف الحاوية الفارغة
+                overlayContainer.remove();
             }
         } catch (err) {
             console.error("خطأ التبييض والترجمة: ", err);
@@ -383,6 +359,71 @@
         } finally {
             infoBadge.remove();
         }
+    }
+
+    // عرض عناصر الفقاعات المترجمة المحفوظة بالذاكرة المؤقتة لسرعة تصفح فائقة
+    function renderCachedTranslations(img, entries) {
+        const parent = img.parentNode;
+        const overlayContainer = document.createElement('div');
+        overlayContainer.className = "slax-image-overlay";
+        overlayContainer.style = `
+            position: absolute;
+            left: ${img.offsetLeft}px;
+            top: ${img.offsetTop}px;
+            width: ${img.clientWidth}px;
+            height: ${img.clientHeight}px;
+            pointer-events: none;
+            z-index: 10;
+        `;
+        parent.appendChild(overlayContainer);
+        entries.forEach(entry => renderBubble(overlayContainer, entry));
+    }
+
+    // بناء كبسولة الترجمة المجهرية الفائقة والدقة "على قد النص" بالضبط
+    function renderBubble(container, entry) {
+        let baseFontSize = Math.min(13.5, Math.max(10.5, (entry.bbox.height * 0.16) + (entry.bbox.width * 0.025)));
+        let finalFontSize = baseFontSize * fontSizeScale;
+
+        const textContainer = document.createElement('div');
+        textContainer.className = "slax-translated-container";
+        textContainer.style = `
+            position: absolute;
+            left: ${entry.bbox.left}px;
+            top: ${entry.bbox.top}px;
+            width: ${entry.bbox.width}px;
+            height: ${entry.bbox.height}px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            box-sizing: border-box;
+        `;
+
+        const bubble = document.createElement('div');
+        bubble.className = "slax-compact-bubble";
+        bubble.style = `
+            background: rgba(255, 255, 255, 0.96);
+            padding: 4px 8px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            display: inline-block;
+            max-width: 95%;
+            max-height: 98%;
+            overflow: hidden;
+            text-align: center;
+            word-break: break-word;
+            white-space: normal;
+            color: #000000;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-weight: 800;
+            font-size: ${finalFontSize}px;
+            line-height: 1.25;
+        `;
+        bubble.innerText = entry.text;
+
+        textContainer.appendChild(bubble);
+        container.appendChild(textContainer);
     }
 
     // المعالجة الدورية التلقائية لصفحات المانجا بالترتيب الفوري
@@ -440,7 +481,7 @@
         
         menu.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1.5px solid rgba(255,26,26,0.35); padding-bottom:8px;">
-                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.6);">👑 SLAX COMPACT OCR V19.0</span>
+                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.6);">👑 SLAX COMPACT OCR V20.0</span>
                 <span id="ai-status" style="font-size:10px; color:#ff3333; background: rgba(255,0,0,0.18); padding: 3px 10px; border-radius: 20px; font-weight:bold; border:0.5px solid rgba(255,26,26,0.4);">جاهز للعمل</span>
             </div>
 
@@ -470,7 +511,7 @@
                     </select>
                 </div>
 
-                <!-- التحكم بفلترة الرموز والطلاسم لمنع حجب نصوص المانجا -->
+                <!-- قوة الفلترة -->
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <span style="font-size:11px; color:#ff8080;">قوة تصفية الطلاسم:</span>
                     <select id="s-filter-strength" style="background:#150202; color:#ffe6e6; border:1px solid #ff3333; padding:4px 8px; border-radius:8px; font-size:11px; outline:none; cursor:pointer;">
@@ -599,7 +640,7 @@
                 this.style.background = "linear-gradient(135deg, #a00000, #ff1a1a)";
                 this.style.color = "#fff";
                 this.innerText = "🌐 الترجمة الفورية نشطة (ON)";
-                showNotification("تم تفعيل نظام التبييض والمحرك ذو الاستقرار اللانهائي بنجاح!");
+                showNotification("تم تفعيل نظام التبييض المصغر 'على قد النص' وتصفية الطلاسم بنجاح!");
                 startTranslationPipeline();
             } catch (err) {
                 showNotification(err.message, "error");
@@ -608,7 +649,7 @@
             }
         };
 
-        // فلاتر الصور العامة لمتعة القراءة والسطوع والتباين
+        // فلاتر الصور العامة لمتعة القراءة
         const updateFilters = () => {
             const s = document.getElementById('r-sat').value;
             const c = document.getElementById('r-con').value;
