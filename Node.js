@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SLAX VIP V15.6 - Smart Compact Translator
+// @name         SLAX VIP V16.0 - Zero Noise Compact Translator
 // @namespace    https://viayoo.com/
-// @version      15.6
-// @description  تبييض ذكي "على قد النص"، تنظيف كامل للطلاسم والرموز السحرية والشخطات، واجهة زجاجية حمراء داكنة رائعة ومحرك فائق الاستقرار.
+// @version      16.0
+// @description  تبييض مجهري "على قد النص بالضبط"، تصفية سحرية تامة للطلاسم والرموز الشبيهة بالرسم، واجهة زجاجية حمراء متوهجة فائقة الأناقة.
 // @author       Slax
 // @run-at       document-start
 // @match        *://*.webtoons.com/*
@@ -14,8 +14,8 @@
 (function() {
     'use strict';
 
-    // حفظ واسترجاع الإعدادات تلقائياً لضمان ثبات التفضيلات
-    const STORAGE_PREFIX = "slax_v15_6_";
+    // إعدادات مستمرة لحفظ تفضيلات المستخدم تلقائياً عبر الأجهزة
+    const STORAGE_PREFIX = "slax_v16_";
     const getSetting = (key, fallback) => localStorage.getItem(STORAGE_PREFIX + key) || fallback;
     const saveSetting = (key, val) => localStorage.setItem(STORAGE_PREFIX + key, val);
 
@@ -26,13 +26,13 @@
     let autoTranslateActive = false;
     let isProcessing = false;
 
-    // محرك نصوص موحد لتجنب تجميد المتصفح
+    // محرك نصوص عالمي موحد فائق السرعة
     let globalTesseractWorker = null;
 
     const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
     const ICON_URL = "https://i.ibb.co/nMBFJ7kV/image.png";
 
-    // تهيئة محرك النصوص الموحد لمرة واحدة فقط
+    // تهيئة محرك النصوص الفوري لمرة واحدة فقط
     async function initGlobalTesseract() {
         if (globalTesseractWorker) return;
         
@@ -41,7 +41,7 @@
                 const script = document.createElement('script');
                 script.src = TESSERACT_CDN;
                 script.onload = () => resolve();
-                script.onerror = () => reject(new Error("فشل تحميل مكتبة الترجمة. تحقق من اتصالك."));
+                script.onerror = () => reject(new Error("فشل تحميل محرك الترجمة الذكي. تحقق من اتصالك."));
                 document.head.appendChild(script);
             });
         }
@@ -49,7 +49,7 @@
         globalTesseractWorker = await Tesseract.createWorker(ocrLanguage);
     }
 
-    // تدمير المحرك عند الإيقاف لتحرير الذاكرة
+    // إغلاق المحرك عند إيقاف الأداة لتوفير رام الهاتف
     async function terminateGlobalTesseract() {
         if (globalTesseractWorker) {
             await globalTesseractWorker.terminate();
@@ -57,7 +57,7 @@
         }
     }
 
-    // جلب الصور بأمان لمنع مشاكل حماية السيرفرات
+    // جلب ملفات الصور بأمان لتجاوز حماية المواقع
     async function getImageBlob(url) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -71,40 +71,47 @@
         });
     }
 
-    // فلتر ذكي لتطهير النصوص المستخرجة ومنع الطلاسم والشخطات السحرية
+    // فلتر ذكي ومبتكر لتنظيف الطلاسم والرموز والشخطات الصادرة من الرسم
     function cleanOcrText(text) {
         if (!text) return "";
         
-        // إزالة الشخطات والرموز التي غالباً ما تسببها خطوط رسم المانجا والحدود
-        let cleaned = text.replace(/[_\-\|\\\/~`@#\$\^&\*\+=\{\}\[\];<>:"]/g, ' ');
+        // 1. التخلص من كافة الرموز والشخطات المتداخلة والخطوط العشوائية
+        let cleaned = text.replace(/[^a-zA-Z0-9\s]/g, ' ');
         
-        // تقليل المسافات الزائدة
-        cleaned = cleaned.replace(/\s+/g, ' ').trim();
+        // 2. إزالة الحروف المتكررة الناتجة عن تظليل الرسام (مثل llll, xxxx, ssss)
+        cleaned = cleaned.replace(/([a-zA-Z])\1{2,}/g, '');
+        
+        // 3. تنظيم وإزالة الفراغات المزدوجة
+        cleaned = cleaned.trim().replace(/\s+/g, ' ');
 
-        // فحص الطلاسم: إذا كان النص قصيراً جداً، أو يحتوي فقط على أرقام أو حروف مفردة، نقوم بإلغائه
-        if (cleaned.length < 2) return "";
-        if (/^\d+$/.test(cleaned)) return ""; // تجاهل الأرقام الصرفة
-        if (/^[a-zA-Z]$/.test(cleaned)) return ""; // تجاهل الحروف المفردة الغريبة
+        // 4. حظر النصوص القصيرة والطلاسم
+        if (cleaned.length < 3) return ""; // تجاهل النصوص الصغيرة جداً غير المفيدة
+        if (/^\d+$/.test(cleaned)) return ""; // تجاهل الأرقام الصرفة التي لا تحتوي حواراً
 
-        // التحقق من أن النص يحتوي على كلمات حوارية حقيقية وليس مجرد ضوضاء
-        if (!/[a-zA-Z]{2,}/.test(cleaned) && ocrLanguage === 'eng') return "";
+        // 5. فلتر الحروف الصوتية السحري (Vowel Check):
+        // يمنع نهائياً الكلمات العشوائية الناتجة عن مسح خطوط الخلفية (مثل: shd, xq, zx, lll)
+        if (ocrLanguage === 'eng') {
+            const hasVowel = /[aeiouyAEIOUY]/i.test(cleaned);
+            if (!hasVowel) return ""; // إذا لم تحتوي الكلمة على حرف صوتي إنجليزي واحد على الأقل، يتم تجاهلها فوراً!
+        }
 
         return cleaned;
     }
 
-    // دمج نصوص المانجا بطلب واحد لمنع حظر Google ولتسريع العملية
+    // إرسال حزمة نصوص الصفحة بطلب واحد مدمج لمنع الحظر وبسرعة خاطفة
     async function translateTextBundle(textsArray, fromLang) {
         if (!textsArray || textsArray.length === 0) return [];
 
-        // تنظيف وتجهيز نصوص المانجا المفردة قبل الإرسال
+        // تنظيف الفلاتر أولاً
         const cleanedTexts = textsArray.map(t => cleanOcrText(t));
         
-        // التحقق من وجود نصوص حقيقية للترجمة بعد الفلترة
+        // إذا كانت جميع الخانات فارغة أو طلاسم، ننهي العملية فوراً توفيراً للوقت
         if (cleanedTexts.every(t => t === "")) {
             return Array(textsArray.length).fill("");
         }
 
-        const combinedText = cleanedTexts.join('\n {SLX} \n');
+        // دمج النصوص باستخدام معرف فريد لفرزها لاحقاً بشكل موثوق
+        const combinedText = cleanedTexts.map((t, i) => t || `SKIP_EMPTY_INDEX_${i}`).join('\n {SLX} \n');
         
         let sourceLang = fromLang === 'eng' ? 'en' : (fromLang === 'kor' ? 'ko' : 'ja');
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=ar&dt=t&q=${encodeURIComponent(combinedText)}`;
@@ -121,14 +128,15 @@
                             data[0].forEach(s => { if (s[0]) translatedCombined += s[0]; });
                         }
                         
-                        // تقسيم الحزمة المترجمة واسترجاع النصوص بالترتيب الموثوق
+                        // تقسيم الحزمة بناءً على المعرف الخاص بالأداة
                         const splitPattern = /\s*\{\s*SLX\s*\}\s*|\s*\{\s*slx\s*\}\s*/gi;
                         const translatedParts = translatedCombined.split(splitPattern).map(p => p.trim());
                         
-                        // دمج النتائج مع التحقق من فلتر الطلاسم
                         const finalTranslations = cleanedTexts.map((original, idx) => {
                             if (original === "") return "";
-                            return translatedParts[idx] || "";
+                            const trans = translatedParts[idx] || "";
+                            if (trans.includes("SKIP_EMPTY_INDEX")) return "";
+                            return trans;
                         });
                         
                         resolve(finalTranslations);
@@ -141,13 +149,13 @@
         });
     }
 
-    // نظام الإشعارات الزجاجي المتناسق
+    // إشعارات الأداة الزجاجية الحمراء الداكنة المتوهجة
     function showNotification(msg, type = "info") {
         const notif = document.createElement('div');
         notif.style = `
             position:fixed; bottom:20px; right:20px; 
-            background:rgba(25, 4, 4, 0.92); 
-            color:${type === 'error' ? '#ff4d4d' : '#ff3333'}; 
+            background:rgba(25, 4, 4, 0.94); 
+            color:${type === 'error' ? '#ff4d4d' : '#ff1a1a'}; 
             border:1.5px solid #ff1a1a; 
             padding:12px 24px; border-radius:16px; 
             z-index:2147483647; font-family:sans-serif; font-size:12px; 
@@ -163,13 +171,13 @@
         }, 3000);
     }
 
-    // تبييض "على قد النص" وإضافة الترجمات النظيفة
+    // تبييض مصغر كبسولي على قد النص المترجم بالضبط
     async function processImage(img) {
         if (img.dataset.ocrProcessed) return;
         img.dataset.ocrProcessed = "processing";
 
         const infoBadge = document.createElement('div');
-        infoBadge.innerText = "⚡ جاري الفحص والترجمة المدمجة...";
+        infoBadge.innerText = "⚡ جاري التبييض المصغر والترجمة...";
         infoBadge.style = "position:absolute; background:rgba(120,5,5,0.92); color:#fff; font-size:10px; padding:4px 8px; border-radius:6px; z-index:99; font-family:sans-serif; pointer-events:none; left:10px; top:10px; border:1px solid #ff3333; box-shadow: 0 0 10px rgba(255,0,0,0.3);";
         
         try {
@@ -184,14 +192,13 @@
                 tempImg.src = blobUrl;
             });
 
-            // إنشاء كانفاس لعمل الـ OCR
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             canvas.width = tempImg.naturalWidth;
             canvas.height = tempImg.naturalHeight;
             ctx.drawImage(tempImg, 0, 0);
 
-            // إنشاء غلاف الصورة لحفظ تناسق التصميم والمواقع
+            // إنشاء غلاف الصورة للمحافظة على موقعها الأصلي
             const wrapper = document.createElement('div');
             wrapper.className = "slax-ocr-wrapper";
             wrapper.style = `position: relative; display: inline-block; width: ${img.clientWidth}px; height: ${img.clientHeight}px;`;
@@ -248,66 +255,73 @@
             }
 
             if (paragraphs && paragraphs.length > 0) {
-                // تجميع ونقاوة النصوص قبل الترجمة لمنع الضوضاء والرموز
                 const rawTexts = paragraphs.map(p => p.text || "");
                 let translatedTexts = [];
 
                 if (translationMode === 'free') {
                     translatedTexts = await translateTextBundle(rawTexts, ocrLanguage);
                 } else {
-                    translatedTexts = rawTexts.map(t => cleanOcrText(t)); // تنقية النصوص في وضع الذكاء الاصطناعي أيضاً
+                    translatedTexts = rawTexts.map(t => cleanOcrText(t));
                 }
 
                 paragraphs.forEach((p, index) => {
                     const bbox = p.bbox;
                     const arabicTranslation = translatedTexts[index];
                     
-                    // إذا كان النص المترجم فارغاً أو طلاسم تم تصفيتها، نتجاوز عرضه لحفظ جمالية الرسمة
+                    // إذا تصفى النص كطلاسم أو كان فارغاً، نتجاوز عرضه نهائياً لتبقى الرسمة نظيفة
                     if (!bbox || !arabicTranslation || arabicTranslation.trim().length === 0) return;
 
                     const width = (bbox.x1 - bbox.x0) * scaleX;
                     const height = (bbox.y1 - bbox.y0) * scaleY;
 
-                    // حجم خط احترافي ومثالي يمنع الضخامة المزعجة
-                    let calculatedFontSize = Math.min(12, Math.max(9.5, (height * 0.15) + (width * 0.02)));
-
-                    const textOverlay = document.createElement('div');
-                    textOverlay.className = "slax-translated-bubble";
-                    textOverlay.innerText = arabicTranslation;
+                    // حساب ذكي جداً لحجم خط متناسق وسهل القراءة
+                    let calculatedFontSize = Math.min(11.5, Math.max(9, (height * 0.14) + (width * 0.025)));
 
                     const left = bbox.x0 * scaleX;
                     const top = bbox.y0 * scaleY;
 
-                    // غلاف "على قد النص" زجاجي ونظيف جداً ويسهل القراءة بدون تخريب الرسمة الخلفية
-                    textOverlay.style = `
+                    // الحاوية الخارجية الشفافة
+                    const textContainer = document.createElement('div');
+                    textContainer.className = "slax-translated-container";
+                    textContainer.style = `
                         position: absolute;
                         left: ${left}px;
                         top: ${top}px;
                         width: ${width}px;
                         height: ${height}px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        pointer-events: none;
+                        z-index: 10;
+                        box-sizing: border-box;
+                    `;
+
+                    // كبسولة التبييض "على قد النص بالضبط" تلتف بحرية وتترك الرسمة خلفها سالمة!
+                    const bubble = document.createElement('div');
+                    bubble.className = "slax-compact-bubble";
+                    bubble.style = `
+                        background: rgba(255, 255, 255, 0.96);
+                        padding: 3px 7px;
+                        border-radius: 6px;
+                        box-shadow: 0 1.5px 5px rgba(0, 0, 0, 0.18);
+                        border: 1px solid rgba(0, 0, 0, 0.1);
+                        display: inline-block;
+                        max-width: 95%;
+                        max-height: 95%;
+                        overflow: hidden;
+                        text-align: center;
+                        word-break: break-word;
                         color: #000000;
                         font-family: system-ui, -apple-system, sans-serif;
                         font-weight: 800;
                         font-size: ${calculatedFontSize}px;
-                        text-align: center;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        line-height: 1.2;
-                        overflow: visible;
-                        word-break: break-word;
-                        pointer-events: none;
-                        z-index: 10;
-                        box-sizing: border-box;
-                        /* التبييض على قد النص بحواف مرنة وخلفية ناعمة جداً */
-                        background: rgba(255, 255, 255, 0.94);
-                        border-radius: 8px;
-                        padding: 3px 6px;
-                        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-                        border: 1px solid rgba(0, 0, 0, 0.08);
+                        line-height: 1.15;
                     `;
+                    bubble.innerText = arabicTranslation;
 
-                    wrapper.appendChild(textOverlay);
+                    textContainer.appendChild(bubble);
+                    wrapper.appendChild(textContainer);
                 });
 
                 img.dataset.ocrProcessed = "success";
@@ -322,7 +336,7 @@
         }
     }
 
-    // تدفق معالجة الصفحات المتتالية
+    // جلب ومعالجة الصور المتبقية بشكل متتابع وسريع
     async function startTranslationPipeline() {
         if (!autoTranslateActive || isProcessing) return;
         isProcessing = true;
@@ -342,7 +356,7 @@
         setTimeout(startTranslationPipeline, 1500);
     }
 
-    // تصميم الواجهة الزجاجية الداكنة باللون الأحمر
+    // بناء واجهة الأداة الحمراء الزجاجية الأنيقة جداً
     function createSlaxUI() {
         if (document.getElementById('slax-root')) return;
 
@@ -373,11 +387,11 @@
         
         menu.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1.5px solid rgba(255,26,26,0.35); padding-bottom:8px;">
-                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.6);">👑 SLAX COMPACT OCR V15.6</span>
+                <span style="color:#ff3333; font-weight:bold; font-size:13px; text-shadow:0 0 8px rgba(255,51,51,0.6);">👑 SLAX COMPACT OCR V16.0</span>
                 <span id="ai-status" style="font-size:10px; color:#ff3333; background: rgba(255,0,0,0.18); padding: 3px 10px; border-radius: 20px; font-weight:bold; border:0.5px solid rgba(255,26,26,0.4);">جاهز للعمل</span>
             </div>
 
-            <!-- لوحة التحكم بالترجمة الفورية -->
+            <!-- لوحة التحكم بالترجمة الفورية التلقائية -->
             <div style="background:rgba(35, 4, 4, 0.7); padding:12px; border-radius:16px; margin-bottom:10px; border:1px solid rgba(255,26,26,0.25);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <span style="font-size:11px; color:#ff8080;">طريقة الترجمة:</span>
@@ -500,7 +514,7 @@
             }
         };
 
-        // تعديل ألوان وفلاتر الصور العامة لمتعة القراءة
+        // فلاتر المانجا الفنية لراحة العين والتشبع
         const updateFilters = () => {
             const s = document.getElementById('r-sat').value;
             const c = document.getElementById('r-con').value;
@@ -518,13 +532,13 @@
 
         sBtn.onclick = () => menu.style.display = menu.style.display === "none" ? "block" : "none";
 
-        // تنظيف الصفحة والبنرات الإعلانية المزعجة
+        // تنظيف وحذف العناصر المشوشة والإعلانات والبنرات
         document.getElementById('s-clean').onclick = () => {
             document.querySelectorAll('header, footer, .ads, #header, iframe, .side-banners, .webtoon-side-ads').forEach(e => e.remove());
             showNotification("تم تصفية وتنظيف عناصر الصفحة بنجاح!");
         };
 
-        // نظام التمرير التلقائي الذكي لقصص الويب تون
+        // تفعيل حركة التمرير الآلي لقصص الويب تون الطويلة
         let scrollInterval = null;
         document.getElementById('s-scroll').onclick = function() {
             if (scrollInterval) {
@@ -542,7 +556,7 @@
         };
         document.getElementById('r-speed').oninput = (e) => document.getElementById('v-speed').innerText = e.target.value;
 
-        // شريط البحث المدمج
+        // شريط البحث المدمج في الأداة
         document.getElementById('s-go-search').onclick = function() {
             const query = document.getElementById('s-input').value;
             if (query) {
@@ -550,7 +564,7 @@
             }
         };
 
-        // ميزة سحب وتحريك وحفظ أيقونة التحكم باللمس (متكاملة لجميع الهواتف والمواقع)
+        // نظام السحب والتحريك باللمس المطور للهواتف والأجهزة اللوحية لحفظ موقع الأداة
         let isDragging = false, startX, startY;
         sBtn.ontouchstart = (e) => {
             isDragging = true;
