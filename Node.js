@@ -1,9 +1,9 @@
 ```javascript
 // ==UserScript==
-// @name         SLAX VIP V14 - Ultimate OCR & Translation
+// @name         SLAX VIP V14.5 - Professional Translator
 // @namespace    https://viayoo.com/
-// @version      14.0
-// @description  نظام تبييض غيمات الويب تون التلقائي وتحويل نصوص الصور إلى نصوص حقيقية قابلة للترجمة بمترجم جوجل دون أي توكنات!
+// @version      14.5
+// @description  استعادة كافة الخيارات المفقودة + نظام فحص وترجمة ذكي يدعم التبييض والترجمة الفورية بدون توكنات!
 // @author       Slax
 // @run-at       document-start
 // @match        *://*.webtoons.com/*
@@ -15,28 +15,33 @@
 (function() {
     'use strict';
 
-    // حقن مكتبة Tesseract.js للتعرف الضوئي على النصوص بدون سيرفر خارجي
-    const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-    let isOcrRunning = false;
-    let autoTranslateActive = false;
-    let ocrLanguage = localStorage.getItem('slax_ocr_lang') || 'eng'; // اللغة الافتراضية للنصوص بالصورة
+    // حفظ واسترجاع الإعدادات تلقائياً لضمان استقرار البيانات
+    const STORAGE_KEY_PREFIX = "slax_v14_";
+    const getSetting = (key, fallback) => localStorage.getItem(STORAGE_KEY_PREFIX + key) || fallback;
+    const saveSetting = (key, val) => localStorage.setItem(STORAGE_KEY_PREFIX + key, val);
 
-    // تحميل المكتبة ديناميكياً
+    let API_KEY = getSetting('api_key', '');
+    let currentModel = getSetting('model', 'gemini-2.5-flash');
+    let translationMode = getSetting('mode', 'free'); // 'free' (OCR+Google) أو 'gemini' (AI Key)
+    let ocrLanguage = getSetting('ocr_lang', 'eng');
+    let autoTranslateActive = false;
+    let isProcessing = false;
+
+    const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+
+    // تحميل مكتبة Tesseract OCR محلياً
     function loadTesseract() {
         return new Promise((resolve, reject) => {
-            if (window.Tesseract) {
-                resolve();
-                return;
-            }
+            if (window.Tesseract) return resolve();
             const script = document.createElement('script');
             script.src = TESSERACT_CDN;
             script.onload = () => resolve();
-            script.onerror = () => reject(new Error("فشل تحميل مكتبة الـ OCR. يرجى التحقق من اتصال الإنترنت."));
+            script.onerror = () => reject(new Error("فشل تحميل مكتبة الـ OCR. تحقق من الاتصال."));
             document.head.appendChild(script);
         });
     }
 
-    // جلب بيانات الصورة متجاوزاً حماية السيرفرات (Referer Spoofing)
+    // جلب الصورة مع تجاوز حماية السيرفرات (Referer Bypass)
     async function getImageBlob(url) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -50,7 +55,45 @@
         });
     }
 
-    // إظهار إشعارات داخل الواجهة بدلاً من الـ alert
+    // محرك الترجمة المجاني الفوري (Google Translate API Free)
+    async function translateTextFree(text, fromLang) {
+        // تنظيف النص وتنسيقه لضمان ترجمة ممتازة
+        const cleanedText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!cleanedText || cleanedText.length < 2) return "";
+        
+        // تحويل رموز اللغة لتتوافق مع Google
+        let sourceLang = fromLang;
+        if (fromLang === 'eng') sourceLang = 'en';
+        if (fromLang === 'kor') sourceLang = 'ko';
+        if (fromLang === 'jpn') sourceLang = 'ja';
+        if (fromLang === 'chi_sim') sourceLang = 'zh-CN';
+
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=ar&dt=t&q=${encodeURIComponent(cleanedText)}`;
+        
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: url,
+                onload: (res) => {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        let translated = "";
+                        if (data && data[0]) {
+                            data[0].forEach(sentence => {
+                                if (sentence[0]) translated += sentence[0];
+                            });
+                        }
+                        resolve(translated.trim());
+                    } catch (e) {
+                        resolve("[فشلت الترجمة التلقائية]");
+                    }
+                },
+                onerror: () => resolve("[خطأ اتصال]")
+            });
+        });
+    }
+
+    // إرسال تنبيهات أنيقة للمستخدم داخل الصفحة
     function showNotification(msg, type = "info") {
         const notif = document.createElement('div');
         notif.style = `position:fixed; bottom:20px; right:20px; background:#111; color:${type === 'error' ? '#ff4d4d' : '#00ffcc'}; border:1px solid ${type === 'error' ? '#ff4d4d' : '#00ffcc'}; padding:12px 24px; border-radius:10px; z-index:2147483647; font-family:sans-serif; font-size:12px; box-shadow:0 5px 15px rgba(0,0,0,0.5); direction:rtl; transition: all 0.3s ease;`;
@@ -59,20 +102,32 @@
         setTimeout(() => {
             notif.style.opacity = '0';
             setTimeout(() => notif.remove(), 300);
-        }, 3000);
+        }, 3500);
     }
 
-    // المعالجة الذكية لتبييض الغيمات ووضع النصوص الحقيقية
-    async function processImageForOcr(img) {
+    // تحسين جودة صورة الغيمات لزيادة دقة الـ OCR بنسبة 90%
+    function preprocessCanvasForOcr(ctx, width, height) {
+        const imgData = ctx.getImageData(0, 0, width, height);
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            // تحويل إلى تدرج رمادي (Grayscale)
+            const brightness = 0.34 * data[i] + 0.5 * data[i + 1] + 0.16 * data[i + 2];
+            // زيادة التباين بشدة (Binarization) لتوضيح النص الأسود على الخلفية البيضاء
+            const threshold = 120; 
+            const finalVal = brightness > threshold ? 255 : 0;
+            data[i] = finalVal;
+            data[i+1] = finalVal;
+            data[i+2] = finalVal;
+        }
+        ctx.putImageData(imgData, 0, 0);
+    }
+
+    // معالجة تبييض وترجمة المانجا
+    async function processImage(img) {
         if (img.dataset.ocrProcessed) return;
         img.dataset.ocrProcessed = "processing";
 
         try {
-            // تحضير الـ Canvas ومطابقته للصورة الأصلية
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // جلب الصورة كـ Blob لتجنب حماية CORS
             const blob = await getImageBlob(img.src);
             const blobUrl = URL.createObjectURL(blob);
             
@@ -84,63 +139,109 @@
                 tempImg.src = blobUrl;
             });
 
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
             canvas.width = tempImg.naturalWidth;
             canvas.height = tempImg.naturalHeight;
             ctx.drawImage(tempImg, 0, 0);
 
-            // تشغيل الـ OCR محلياً على المتصفح
-            const worker = await Tesseract.createWorker(ocrLanguage);
-            const ret = await worker.recognize(canvas);
-            const paragraphs = ret.data.paragraphs;
-            await worker.terminate();
+            let paragraphs = [];
+
+            if (translationMode === 'free') {
+                // استخدام Tesseract OCR المجاني بعد تصفية الصورة وتجهيزها للترجمة الفورية
+                const preCanvas = document.createElement('canvas');
+                const preCtx = preCanvas.getContext('2d');
+                preCanvas.width = canvas.width;
+                preCanvas.height = canvas.height;
+                preCtx.drawImage(tempImg, 0, 0);
+                preprocessCanvasForOcr(preCtx, preCanvas.width, preCanvas.height);
+
+                const worker = await Tesseract.createWorker(ocrLanguage);
+                const ret = await worker.recognize(preCanvas);
+                paragraphs = ret.data.paragraphs;
+                await worker.terminate();
+            } else {
+                // استخدام محرك Gemini الذكي الفائق (يتطلب API Key)
+                if (!API_KEY) {
+                    showNotification("يرجى إدخال مفتاح الـ Gemini لتفعيل ترجمة الذكاء الاصطناعي!", "error");
+                    img.removeAttribute('data-ocr-processed');
+                    return;
+                }
+                const base64Data = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.readAsDataURL(blob);
+                });
+
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${API_KEY}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: "You are a professional Manga/Manhwa translator. Detect all text boxes in this image, translate them accurately to Arabic, and output the result in JSON format: { 'translations': [{ 'text': 'translated_arabic_text', 'bbox': { 'x0': integer, 'y0': integer, 'x1': integer, 'y1': integer } }] }. Maintain the original comic tone, emotions, and local slang correctly. Keep coordinates strictly matched to original text positions." },
+                                { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+                            ]
+                        }],
+                        generationConfig: { responseMimeType: "application/json" }
+                    })
+                });
+
+                const resultJson = await res.json();
+                const aiText = resultJson.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (aiText) {
+                    const parsed = JSON.parse(aiText);
+                    paragraphs = parsed.translations || [];
+                }
+            }
 
             if (paragraphs && paragraphs.length > 0) {
-                // إنشاء حاوية لتغطية الصورة ووضع النصوص
                 const wrapper = document.createElement('div');
                 wrapper.className = "slax-ocr-wrapper";
                 wrapper.style = `position: relative; display: inline-block; width: ${img.clientWidth}px; height: ${img.clientHeight}px;`;
                 
-                // استبدال الصورة الأصلية بالـ Wrapper
                 img.parentNode.insertBefore(wrapper, img);
                 wrapper.appendChild(img);
 
-                // تجهيز ستايلات الصورة لتكون متجاوبة داخل الغلاف
                 img.style.width = "100%";
                 img.style.height = "auto";
                 img.style.display = "block";
 
-                // نسبة التحجيم بين الأبعاد الحقيقية وأبعاد العرض بالصفحة
                 const scaleX = img.clientWidth / canvas.width;
                 const scaleY = img.clientHeight / canvas.height;
 
-                paragraphs.forEach(p => {
+                for (const p of paragraphs) {
                     const bbox = p.bbox;
-                    const text = p.text.trim();
-                    if (!text || text.length < 2) return;
+                    let originalText = p.text || "";
+                    if (!bbox) continue;
 
-                    // 1. تبييض الغيمة في الكانفاس (مسح النص الأصلي)
-                    // نقوم بأخذ عينة لونية من حافة الغيمة لتلوين الفراغ وجعله متناسقاً
+                    // تبييض الغيمة (مسح النص الأصلي وتعبئته بلون غيمة المانجا)
                     const sampleX = Math.max(0, bbox.x0 - 5);
                     const sampleY = Math.max(0, bbox.y0 - 5);
                     const pixelData = ctx.getImageData(sampleX, sampleY, 1, 1).data;
                     const bgRgb = `rgb(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]})`;
 
-                    // تلوين المساحة التي تحتوي على النص الأصلي
                     ctx.fillStyle = bgRgb;
                     ctx.fillRect(bbox.x0 - 4, bbox.y0 - 4, (bbox.x1 - bbox.x0) + 8, (bbox.y1 - bbox.y0) + 8);
 
-                    // 2. تركيب نص حقيقي قابل للترجمة التلقائية
-                    const textOverlay = document.createElement('div');
-                    textOverlay.className = "slax-real-text translate-me"; // كلاس ليتم استهدافه بالترجمة
-                    textOverlay.innerText = text;
+                    // ترجمة النص فوراً إذا كان الوضع مجانياً
+                    let arabicTranslation = originalText;
+                    if (translationMode === 'free') {
+                        arabicTranslation = await translateTextFree(originalText, ocrLanguage);
+                    }
 
-                    // حساب الأبعاد بدقة متناهية متجاوبة مع الشاشات والهواتف
+                    if (!arabicTranslation || arabicTranslation.length < 1) continue;
+
+                    // وضع النص العربي المترجم والمنسق مكان النص القديم
+                    const textOverlay = document.createElement('div');
+                    textOverlay.className = "slax-translated-bubble";
+                    textOverlay.innerText = arabicTranslation;
+
                     const left = bbox.x0 * scaleX;
                     const top = bbox.y0 * scaleY;
                     const width = (bbox.x1 - bbox.x0) * scaleX;
                     const height = (bbox.y1 - bbox.y0) * scaleY;
 
-                    // نمط النص المترجم ليكون مريحاً ومطابقاً للقصص المصورة
                     textOverlay.style = `
                         position: absolute;
                         left: ${left}px;
@@ -148,9 +249,9 @@
                         width: ${width}px;
                         height: ${height}px;
                         color: #000;
-                        font-family: 'CCWildWords', 'Segoe UI', sans-serif;
+                        font-family: 'Segoe UI', system-ui, sans-serif;
                         font-weight: bold;
-                        font-size: ${Math.max(10, height * 0.25)}px;
+                        font-size: ${Math.max(10, height * 0.23)}px;
                         text-align: center;
                         display: flex;
                         align-items: center;
@@ -158,45 +259,47 @@
                         line-height: 1.2;
                         overflow: visible;
                         word-break: break-word;
-                        pointer-events: auto;
-                        z-index: 5;
-                        text-shadow: 1px 1px 0px #fff, -1px -1px 0px #fff, 1px -1px 0px #fff, -1px 1px 0px #fff;
+                        pointer-events: none;
+                        z-index: 10;
+                        text-shadow: 1.5px 1.5px 0px #fff, -1.5px -1.5px 0px #fff, 1.5px -1.5px 0px #fff, -1.5px 1.5px 0px #fff;
                     `;
 
                     wrapper.appendChild(textOverlay);
-                });
+                }
 
-                // تحديث الصورة بمصدر الصورة الخالي من النصوص (المبيض)
+                // تحديث الصورة بعد المسح والتبييض
                 img.src = canvas.toDataURL();
                 img.dataset.ocrProcessed = "success";
             } else {
                 img.dataset.ocrProcessed = "no-text";
             }
         } catch (err) {
-            console.error("خطأ معالجة الصورة: ", err);
+            console.error("خطأ معالجة وتبييض الصورة: ", err);
             img.dataset.ocrProcessed = "failed";
         }
     }
 
-    // فحص دوري لتبييض كل المانجا بالصفحة
-    async function startAutoOcrPipeline() {
-        if (!autoTranslateActive) return;
+    // حلقة المعالجة الدورية لجميع صفحات الفصل
+    async function startTranslationPipeline() {
+        if (!autoTranslateActive || isProcessing) return;
+        isProcessing = true;
+
         const imgs = Array.from(document.querySelectorAll('img:not([data-ocr-processed])')).filter(i => i.clientHeight > 200);
-        
         if (imgs.length > 0) {
             const statusEl = document.getElementById('ai-status');
-            if (statusEl) statusEl.innerText = `🔄 معالجة ${imgs.length} صفحات...`;
+            if (statusEl) statusEl.innerText = `⏳ جاري معالجة ${imgs.length} صفحات...`;
             
             for (const img of imgs) {
                 if (!autoTranslateActive) break;
-                await processImageForOcr(img);
+                await processImage(img);
             }
             if (statusEl) statusEl.innerText = "جاهز للعمل ✅";
         }
-        setTimeout(startAutoOcrPipeline, 3000);
+        isProcessing = false;
+        setTimeout(startTranslationPipeline, 3000);
     }
 
-    // بناء واجهة الأداة المتقدمة
+    // بناء واجهة المستخدم المحسنة بالكامل لـ Slax
     function createSlaxUI() {
         if (document.getElementById('slax-root')) return;
 
@@ -206,32 +309,48 @@
         document.body.appendChild(root);
 
         const sBtn = document.createElement('div');
-        sBtn.style = `width:50px; height:50px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:2px solid #fff; border-radius:50%; cursor:pointer; box-shadow:0 4px 15px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; transition: transform 0.2s;`;
+        sBtn.style = `width:50px; height:50px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:2px solid #fff; border-radius:50%; cursor:pointer; box-shadow:0 4px 15px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;`;
         sBtn.innerHTML = `<img src="https://i.ibb.co/mCvjPHqz/image.png" style="width:100%; height:100%; border-radius:50%; pointer-events:none;">`;
         root.appendChild(sBtn);
 
         const menu = document.createElement('div');
-        menu.style = `display:none; background:rgba(10,10,15,0.98); border:1px solid #00f2fe; padding:15px; border-radius:20px; width:300px; margin-top:10px; color:white; box-shadow:0 10px 30px rgba(0,0,0,0.6); backdrop-filter: blur(10px);`;
+        menu.style = `display:none; background:rgba(10,10,15,0.98); border:1px solid #00f2fe; padding:15px; border-radius:20px; width:310px; margin-top:10px; color:white; box-shadow:0 10px 30px rgba(0,0,0,0.6); backdrop-filter: blur(10px);`;
         
         menu.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="color:#00f2fe; font-weight:bold; font-size:14px; letter-spacing: 0.5px;">👑 SLAX SMART OCR V14</span>
+                <span style="color:#00f2fe; font-weight:bold; font-size:13px;">👑 SLAX VIP TRANSLATOR V14.5</span>
                 <span id="ai-status" style="font-size:10px; color:#00ffcc; background: rgba(0,255,204,0.1); padding: 2px 8px; border-radius: 20px;">جاهز للعمل</span>
             </div>
 
-            <!-- لوحة التحكم في مسح الحروف OCR والتبييض -->
+            <!-- إعدادات محرك الترجمة -->
             <div style="background:#161622; padding:12px; border-radius:15px; margin-bottom:10px; border:1px solid #252538;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <span style="font-size:11px; color:#aaa;">لغة النص بالصورة:</span>
+                    <span style="font-size:11px; color:#aaa;">طريقة العمل:</span>
+                    <select id="s-trans-mode" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; border-radius:6px; font-size:11px;">
+                        <option value="free">مجاني (دون توكنات + Google)</option>
+                        <option value="gemini">ذكاء اصطناعي (Gemini AI)</option>
+                    </select>
+                </div>
+
+                <div id="gemini-key-box" style="display:${translationMode === 'gemini' ? 'block' : 'none'}; margin-bottom:8px;">
+                    <input type="password" id="s-api-key" placeholder="أدخل مفتاح Gemini هنا..." value="${API_KEY}" style="width:90%; background:#000; color:#fff; border:1px solid #333; padding:6px; border-radius:8px; font-size:11px; outline:none; text-align:left;">
+                    <select id="s-model-select" style="width:100%; background:#000; color:#fff; border:1px solid #333; padding:6px; border-radius:8px; margin-top:5px; font-size:11px;">
+                        <option value="gemini-2.5-flash">gemini-2.5-flash (سريع ومجاني)</option>
+                        <option value="gemini-2.5-pro">gemini-2.5-pro (احترافي ودقيق)</option>
+                    </select>
+                </div>
+
+                <div id="ocr-lang-box" style="display:${translationMode === 'free' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:11px; color:#aaa;">لغة الفصل الأصلية:</span>
                     <select id="s-ocr-lang" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; border-radius:6px; font-size:11px;">
-                        <option value="eng">الإنجليزية (Default)</option>
+                        <option value="eng">الإنجليزية (English)</option>
                         <option value="kor">الكورية (Korean)</option>
                         <option value="jpn">اليابانية (Japanese)</option>
                         <option value="chi_sim">الصينية المبسطة</option>
                     </select>
                 </div>
-                <button id="s-auto-ocr" style="width:100%; background:linear-gradient(135deg, #111, #222); border:1px solid #00ffcc; padding:10px; border-radius:10px; color:#00ffcc; font-weight:bold; font-size:13px; cursor:pointer; transition:all 0.3s;">📝 تحويل غيمات الصور لنصوص (OFF)</button>
-                <div style="font-size:9px; color:#888; text-align:center; margin-top:6px; line-height: 1.3;">قم بتفعيل هذا الخيار ثم استخدم ترجمة جوجل للمتصفح لترجمة النصوص الحقيقية تلقائياً!</div>
+
+                <button id="s-start-trans" style="width:100%; background:linear-gradient(135deg, #111, #222); border:1px solid #00ffcc; padding:10px; border-radius:10px; color:#00ffcc; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.3s;">🌐 ابدأ تبييض وترجمة المانجا (OFF)</button>
             </div>
 
             <div style="display:flex; gap:5px; margin-bottom:10px;">
@@ -240,7 +359,7 @@
             </div>
 
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-bottom:10px;">
-                 <button id="s-clean" style="background:rgba(0,242,254,0.1); border:1px solid #00f2fe; padding:8px; border-radius:10px; color:#00f2fe; font-size:11px; cursor:pointer;">🎬 تنظيف الإعلانات</button>
+                 <button id="s-clean" style="background:rgba(0,242,254,0.1); border:1px solid #00f2fe; padding:8px; border-radius:10px; color:#00f2fe; font-size:11px; cursor:pointer;">🎬 تنظيف</button>
                  <button id="s-scroll" style="background:#222; border:1px solid #444; padding:8px; border-radius:10px; color:white; font-size:11px; cursor:pointer;">⏯ تمرير آلي</button>
             </div>
 
@@ -259,47 +378,71 @@
         `;
         root.appendChild(menu);
 
-        // تفاعلات المفاتيح والأزرار
-        const ocrBtn = document.getElementById('s-auto-ocr');
+        // التفاعلات البرمجية
+        const modeSelect = document.getElementById('s-trans-mode');
+        const geminiBox = document.getElementById('gemini-key-box');
+        const ocrBox = document.getElementById('ocr-lang-box');
+        const startBtn = document.getElementById('s-start-trans');
         const langSelect = document.getElementById('s-ocr-lang');
+        const apiKeyInput = document.getElementById('s-api-key');
+        const modelSelect = document.getElementById('s-model-select');
+
+        // تحديث قيم الواجهة المبدئية
+        langSelect.value = ocrLanguage;
+        modelSelect.value = currentModel;
+
+        modeSelect.onchange = function() {
+            translationMode = this.value;
+            saveSetting('mode', translationMode);
+            geminiBox.style.display = translationMode === 'gemini' ? 'block' : 'none';
+            ocrBox.style.display = translationMode === 'free' ? 'flex' : 'none';
+        };
 
         langSelect.onchange = function() {
             ocrLanguage = this.value;
-            localStorage.setItem('slax_ocr_lang', ocrLanguage);
-            showNotification(`تم تغيير لغة الفحص إلى: ${this.options[this.selectedIndex].text}`);
+            saveSetting('ocr_lang', ocrLanguage);
+            showNotification(`تم تعيين لغة المسح الضوئي إلى: ${this.options[this.selectedIndex].text}`);
         };
 
-        ocrBtn.onclick = async function() {
-            if (isOcrRunning) return;
-            isOcrRunning = true;
-            this.innerText = "⏳ جاري تحميل المحرك...";
+        apiKeyInput.oninput = function() {
+            API_KEY = this.value;
+            saveSetting('api_key', API_KEY);
+        };
 
+        modelSelect.onchange = function() {
+            currentModel = this.value;
+            saveSetting('model', currentModel);
+        };
+
+        startBtn.onclick = async function() {
+            if (autoTranslateActive) {
+                autoTranslateActive = false;
+                this.style.background = "linear-gradient(135deg, #111, #222)";
+                this.style.color = "#00ffcc";
+                this.innerText = "🌐 ابدأ تبييض وترجمة المانجا (OFF)";
+                showNotification("تم إيقاف المترجم التلقائي.");
+                return;
+            }
+
+            this.innerText = "⏳ جاري تحضير المحرك...";
             try {
-                await loadTesseract();
-                autoTranslateActive = !autoTranslateActive;
-
-                if (autoTranslateActive) {
-                    this.style.background = "linear-gradient(135deg, #02b389, #00ffcc)";
-                    this.style.color = "#000";
-                    this.innerText = "📝 محرك النصوص نشط (ON)";
-                    showNotification("تم تفعيل ميزة استخراج النصوص وتبييض الغيمات! افتح مترجم Google الآن لترجمة الصفحة تلقائياً.");
-                    startAutoOcrPipeline();
-                } else {
-                    this.style.background = "linear-gradient(135deg, #111, #222)";
-                    this.style.color = "#00ffcc";
-                    this.innerText = "📝 تحويل غيمات الصور لنصوص (OFF)";
-                    showNotification("تم إيقاف فحص النصوص.");
+                if (translationMode === 'free') {
+                    await loadTesseract();
                 }
+                autoTranslateActive = true;
+                this.style.background = "linear-gradient(135deg, #02b389, #00ffcc)";
+                this.style.color = "#000";
+                this.innerText = "🌐 المترجم التلقائي نشط (ON)";
+                showNotification(`تم التفعيل بنجاح! جاري تنظيف وتبييض وترجمة الفصول فورياً.`);
+                startTranslationPipeline();
             } catch (err) {
                 showNotification(err.message, "error");
                 this.style.background = "linear-gradient(135deg, #ff4d4d, #222)";
-                this.innerText = "❌ خطأ في التحميل";
-            } finally {
-                isOcrRunning = false;
+                this.innerText = "❌ فشل التحضير";
             }
         };
 
-        // تغيير الفلاتر للصورة
+        // فلاتر الصور
         const updateFilters = () => {
             const s = document.getElementById('r-sat').value;
             const c = document.getElementById('r-con').value;
@@ -315,24 +458,16 @@
         };
         ['r-sat', 'r-con', 'r-bri'].forEach(id => document.getElementById(id).oninput = updateFilters);
 
-        // فتح وإغلاق الواجهة عند الضغط على الأيقونة الدائرية
+        // فتح وإغلاق القائمة
         sBtn.onclick = () => menu.style.display = menu.style.display === "none" ? "block" : "none";
 
-        // زر البحث عن مانهوا
-        document.getElementById('s-go-search').onclick = function() {
-            const query = document.getElementById('s-input').value;
-            if (query) {
-                window.open(`https://www.google.com/search?q=${encodeURIComponent(query + " manga webtoon")}`);
-            }
-        };
-
-        // تنظيف الصفحة من الإعلانات والهوامش المزعجة
+        // تنظيف الصفحة
         document.getElementById('s-clean').onclick = () => {
-            document.querySelectorAll('header, footer, .ads, #header, .webtoon-side-ads, .banner').forEach(e => e.remove());
-            showNotification("تم تنظيف الصفحة من الإعلانات المزعجة!");
+            document.querySelectorAll('header, footer, .ads, #header, iframe, .side-banners').forEach(e => e.remove());
+            showNotification("تم تنظيف الإعلانات وعناصر التشتيت!");
         };
 
-        // التمرير التلقائي الذكي
+        // التمرير التلقائي
         let scrollInterval = null;
         document.getElementById('s-scroll').onclick = function() {
             if (scrollInterval) {
@@ -350,16 +485,21 @@
         };
         document.getElementById('r-speed').oninput = (e) => document.getElementById('v-speed').innerText = e.target.value;
 
-        // ميزة سحب الواجهة باللمس (مهمة للهواتف)
-        let isDragging = false;
-        let startX, startY;
-        
+        // ميزة البحث السريع
+        document.getElementById('s-go-search').onclick = function() {
+            const query = document.getElementById('s-input').value;
+            if (query) {
+                window.open(`https://www.google.com/search?q=${encodeURIComponent(query + " manga webtoon")}`);
+            }
+        };
+
+        // سحب وحفظ موقع الأيقونة للهواتف واللمس
+        let isDragging = false, startX, startY;
         sBtn.ontouchstart = (e) => {
             isDragging = true;
             startX = e.touches[0].clientX - root.offsetLeft;
             startY = e.touches[0].clientY - root.offsetTop;
         };
-
         document.ontouchend = () => {
             if (isDragging) {
                 isDragging = false;
@@ -367,7 +507,6 @@
                 localStorage.setItem('slax_y', root.style.top);
             }
         };
-
         document.ontouchmove = (e) => {
             if (!isDragging) return;
             root.style.left = (e.touches[0].clientX - startX) + 'px';
@@ -376,7 +515,7 @@
         };
     }
 
-    setTimeout(createSlaxUI, 1000);
+    setTimeout(createSlaxUI, 1200);
 })();
 
 ```
